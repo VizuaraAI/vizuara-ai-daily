@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Diffusion Language Models — A Visual Walkthrough</title>
+<meta name="description" content="Every chatbot writes one word at a time. Diffusion language models throw that rule away — they start from a page of static and sharpen it into a sentence, many words at once. A simple, visual explainer of how dLLMs work and why, in 2026, they got fast enough to matter." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara" style="width:26px;height:26px;border-radius:5px;border:1px solid rgba(40,30,20,0.25);background:#fff"> Vizuara · AI Daily</span>
+    <span class="vol">New research · How machines write</span>
+    <span class="small-caps">Jun 11, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">A different way to generate text</p>
+  <h1 class="anim" style="animation-delay:.15s">
+    The Model<br>That Writes<br><em>All at Once.</em>
+  </h1>
+  <p class="lede anim" style="animation-delay:.35s">
+    Every chatbot you have ever used writes like a person typing — one word, then the next, then
+    the next, never going back. <em>Diffusion language models</em> throw that rule away. They start
+    with a page of static and sharpen it into a sentence, many words at a time. Here is how that
+    works, and why, in 2026, it finally got fast enough to matter.
+  </p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>For five years, "large language model" has quietly meant "next-word predictor." But the
+       same family of models behind AI image generators — diffusion models — learned to do text
+       too. This is the clearest mental picture I can give you of how they pull it off.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">The one-word-at-a-time machine</a><span class="pg">the bottleneck</span></li>
+    <li><span class="num">02</span><a href="#s2">An idea borrowed from image generators</a><span class="pg">noise → meaning</span></li>
+    <li><span class="num">03</span><a href="#s3">How a diffusion model actually writes</a><span class="pg">the unmasking loop</span></li>
+    <li><span class="num">04</span><a href="#s4">Why it can be so much faster</a><span class="pg">steps, not length</span></li>
+    <li><span class="num">05</span><a href="#s5">The catch — and the clever fix</a><span class="pg">words that disagree</span></li>
+    <li><span class="num">06</span><a href="#s6">The 2026 frontier</a><span class="pg">where it's going</span></li>
+    <li><span class="num">07</span><a href="#s7">Why this matters</a><span class="pg">the takeaway</span></li>
+  </ol>
+</nav>
+
+<!-- ============== 01 ============== -->
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>The one-word-at-a-time machine</h2>
+  <p class="drop">Ask ChatGPT, Claude, or Gemini a question and watch the answer appear. It streams
+    out left to right, word by word, like someone typing in real time. That is not a cosmetic
+    animation — it is literally how the model thinks. These are <span class="hl">autoregressive</span>
+    models: each word is predicted from all the words before it, and only then is the next word
+    predicted. To write a 500-word answer, the model has to run itself 500 times in a row.</p>
+  <p>This design is wonderful for quality. Every new word gets to "see" everything written so far,
+    so the text stays coherent. But it has one stubborn cost: the words must come <em>in order</em>.
+    You cannot write word #200 until words #1 through #199 exist. The model is a brilliant writer
+    chained to a typewriter — it can only move forward, one key at a time.</p>
+  <figure>
+    <img src="figures/fig1-autoregressive-bottleneck.png" alt="Autoregressive generation produces one token at a time, left to right, each depending on all previous tokens, so N tokens require N sequential model passes.">
+    <figcaption><span class="fig-label">Fig 1</span> Autoregressive generation: each token is produced from the ones before it, strictly in sequence. Writing <em>N</em> words means running the model <em>N</em> times — latency grows with the length of the answer.</figcaption>
+  </figure>
+  <p class="marginalia">"Token" ≈ a word or word-piece. A model's vocabulary is made of tens of
+    thousands of these. For this article, just read "token" as "word."</p>
+  <p>For most of the deep-learning era, we simply accepted this. Then a few researchers asked a
+    mischievous question: what if a model could write a whole sentence the way an image generator
+    paints a whole picture — <span class="hl">all of it at once</span>, then cleaned up?</p>
+</section>
+
+<!-- ============== 02 ============== -->
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>An idea borrowed from image generators</h2>
+  <p class="drop">You have probably seen an AI image start as a field of random noise and gradually
+    resolve into a photo of a corgi. That process is called <span class="hl">diffusion</span>. It is
+    trained in a clever, almost lazy way. Take a real photo, add a little noise, add more, add more,
+    until it is pure static. Now train a model to undo one step of that — to look at a noisy image
+    and guess the slightly cleaner version. Do that millions of times and the model learns to walk
+    all the way from static back to a real-looking image.</p>
+  <p>Diffusion language models take exactly this recipe and swap "noise" for something that makes
+    sense for text: <span class="hl">masking</span>. Instead of blurring pixels, you hide words.</p>
+  <p>During training, the model is shown a real sentence with some words randomly replaced by a
+    blank <code>[MASK]</code> tag — sometimes one or two words hidden, sometimes nearly all of them.
+    Its only job is to fill the blanks back in. That is the whole training signal.</p>
+  <div class="formula">
+    forward (corrupt): &nbsp; clean sentence &nbsp;<em>→</em>&nbsp; hide a fraction <em>t</em> of words &nbsp;<em>→</em>&nbsp; all <code>[MASK]</code>
+  </div>
+  <figure>
+    <img src="figures/fig2-forward-reverse-process.png" alt="The forward process masks more and more words until a sentence is fully [MASK]; the reverse process is the model learning to predict the masked words back, turning all-masked into readable text.">
+    <figcaption><span class="fig-label">Fig 2</span> Two directions of one process. <strong>Forward:</strong> corrupt a real sentence by hiding more and more words (this builds the training data). <strong>Reverse:</strong> the model learns to walk back — from all-blanks to readable text — by predicting what the masked words should be.</figcaption>
+  </figure>
+  <p>Notice the trick. The hard direction — going from <em>nothing</em> to a <em>sentence</em> — is
+    never trained directly. We only ever train the easy direction: "here is a partly-masked
+    sentence, guess the missing words." Stack enough of those easy steps together and you get the
+    hard thing for free. <span class="hl">Generation is just denoising, run from a blank page.</span></p>
+</section>
+
+<!-- ============== 03 ============== -->
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>How a diffusion model actually writes</h2>
+  <p class="drop">Here is the part that surprises people. To generate text, a diffusion model does
+    not start from an empty cursor. It starts from a row of blanks — a sentence that is
+    <span class="hl">entirely</span> <code>[MASK]</code>, of roughly the length it intends to write —
+    and then refines it over a handful of rounds called <em>denoising steps</em>.</p>
+  <p>Each step looks the same:</p>
+  <p><strong>1. Predict everything, everywhere, at once.</strong> The model looks at all the blanks
+    simultaneously and proposes a best-guess word for <em>every</em> position in parallel — not just
+    the next one.<br>
+    <strong>2. Commit only what it's sure about.</strong> It keeps the handful of guesses it is most
+    confident in and "locks them in" (unmasks them).<br>
+    <strong>3. Re-mask the rest.</strong> The shakier positions are blanked out again and revisited
+    on the next round, now with more context to lean on.</p>
+  <p>Repeat for, say, ten to fifty rounds and the blanks fill in — not left to right, but
+    <span class="hl">most-confident first</span>, like a person solving a crossword by writing in the
+    answers they are sure of and circling back to the tricky clues.</p>
+  <figure>
+    <img src="figures/fig3-iterative-unmasking-loop.png" alt="Generation as iterative unmasking: start fully masked, predict all positions in parallel, commit the confident tokens, re-mask the rest, repeat over T steps until the full sentence appears.">
+    <figcaption><span class="fig-label">Fig 3</span> Generation is iterative unmasking. Start from all blanks; each round, predict every position at once, lock in the confident words, re-mask the rest, and repeat. The sentence emerges in a few rounds — order optional.</figcaption>
+  </figure>
+  <div class="pull-quote">It doesn't write the sentence from left to right. It sculpts the whole sentence at once, sharpening it round by round.</div>
+  <p>Because the model can see the blanks on <em>both</em> sides of any word while it guesses, it is
+    naturally good at filling middles, matching brackets, and keeping a long answer internally
+    consistent — things a strictly left-to-right model has to do blind.</p>
+</section>
+
+<!-- ============== 04 ============== -->
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Why it can be so much faster</h2>
+  <p class="drop">Now the payoff. An autoregressive model needs one full pass through the network
+    for every single word — 512 words, 512 passes, strictly in a line. A diffusion model needs one
+    pass per <em>denoising step</em>, and there are only a handful of steps — typically ten to fifty —
+    no matter how long the answer is.</p>
+  <p>That is the whole game in one sentence: <span class="hl">an autoregressive model's cost grows
+    with the length of the text; a diffusion model's cost grows with the number of refinement
+    steps.</span> Choose 25 steps and a 512-word answer costs 25 passes, not 512.</p>
+  <figure>
+    <img src="figures/fig4-speed-comparison.png" alt="Bar chart: autoregressive needs 512 forward passes for 512 tokens; diffusion needs only T (about 10 to 50) steps, 5 to 25 times fewer; throughput callout of about 892 tokens per second for LLaDA 2.1.">
+    <figcaption><span class="fig-label">Fig 4</span> Cost scales with steps, not length. Generating 512 tokens takes 512 sequential passes for an autoregressive model but only <em>T</em> (≈10–50) for a diffusion model — often 5–25× fewer. In 2026, tuned systems like LLaDA&nbsp;2.1 report on the order of 892 tokens/second.</figcaption>
+  </figure>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">1 / word</span><span class="lbl">AR forward passes</span></div>
+    <div class="stat"><span class="num">10–50</span><span class="lbl">diffusion steps total</span></div>
+    <div class="stat"><span class="num">5–25×</span><span class="lbl">fewer passes</span></div>
+    <div class="stat"><span class="num">~892</span><span class="lbl">tokens/sec (LLaDA&nbsp;2.1)</span></div>
+  </div>
+  <p>This is why diffusion language models are exciting for anyone who cares about <em>latency</em> —
+    chat that feels instant, code that completes the moment you stop typing, agents that take many
+    small steps and cannot afford to wait on each one. Fewer passes, more words per pass.</p>
+</section>
+
+<!-- ============== 05 ============== -->
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>The catch — and the clever fix</h2>
+  <p class="drop">If generating words in parallel were free, autoregressive models would already be
+    extinct. They are not, because parallelism has a real hazard: words chosen <em>independently</em>
+    can quietly contradict each other. Fill two blanks at the same time and the model might commit to
+    "tea" in one and "coffee" in the other within the same cup — each a fine guess alone, nonsense
+    together.</p>
+  <p>The fix that defined 2026 research is to stop pretending the blanks are independent. Before
+    committing, the model uses its attention to ask: <span class="hl">which of these blanks actually
+    depend on each other?</span> Words that lean on one another are decoded in separate rounds;
+    words that don't can be safely unmasked together. This is the idea behind
+    <em>dependency-aware parallel decoding</em> — find a group of mutually-independent blanks and
+    fill that whole group at once.</p>
+  <figure>
+    <img src="figures/fig5-dependency-aware-parallel.png" alt="Left: naive parallel decoding fills blanks independently and produces a contradiction. Right: a dependency graph over masked tokens; an independent set of non-connected nodes is unmasked together while dependent ones wait.">
+    <figcaption><span class="fig-label">Fig 5</span> Why naïve parallelism breaks, and how 2026 methods repair it. Tokens that depend on each other are linked in a graph; the model unmasks a mutually-<em>independent</em> set in parallel and defers the rest — speed without the contradictions.</figcaption>
+  </figure>
+  <p>A related trick is to generate in <span class="hl">blocks</span>: write a chunk of the answer
+    with diffusion, lock it, then move to the next chunk. That recovers some of the left-to-right
+    coherence autoregressive models get for free, while keeping the parallel speed within each block.
+    The whole frontier is a negotiation between two goods — <em>how fast can we go</em> versus
+    <em>how sure are we the words still agree</em>.</p>
+</section>
+
+<!-- ============== 06 ============== -->
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>The 2026 frontier</h2>
+  <p class="drop">For years diffusion text was a research curiosity — elegant, but slower and weaker
+    than the autoregressive champions. That changed quickly. Four lines of work, all moving at once,
+    are what turned it into something you will actually use.</p>
+  <figure>
+    <img src="figures/fig6-frontier-2026.png" alt="A landscape map of diffusion language models in 2026 with four branches: continuous denoising (DSL-LLaDA), test-time scaling (Prism), reasoning (Think-First-Diffuse-Fast), and production systems (Mercury, LLaDA 2.1).">
+    <figcaption><span class="fig-label">Fig 6</span> Four directions pushing diffusion language models forward in 2026 — softer noise, longer thinking, real reasoning, and shipped systems.</figcaption>
+  </figure>
+  <h4>Continuous denoising</h4>
+  <p>The original recipe flips a word from hidden to revealed in one hard jump. Newer work replaces
+    that binary mask with a <em>soft</em> noise — nudging each word a little in meaning-space and
+    deferring the final hard choice to the very last step. It is a smoother climb, and it scales to
+    8-billion-parameter models (e.g. the <span class="hl-gold">DSL</span> line of work).</p>
+  <h4>Test-time scaling</h4>
+  <p>Just as reasoning chatbots got smarter by "thinking longer," diffusion models can spend extra
+    steps searching and checking their own drafts (methods like <span class="hl-gold">Prism</span>
+    add hierarchical search and self-verification). More steps, better answers — a dial you can turn
+    at generation time.</p>
+  <h4>Reasoning</h4>
+  <p>Pure parallelism struggles with step-by-step logic. A practical compromise: let a small
+    left-to-right model sketch a <em>plan</em>, then let the diffusion model fill in the details
+    fast — "think first, diffuse fast."</p>
+  <h4>Production systems</h4>
+  <p>Most importantly, diffusion LLMs left the lab. Commercial models like
+    <span class="hl-gold">Mercury</span> and open releases like <span class="hl-gold">LLaDA&nbsp;2.1</span>
+    now serve real traffic at hundreds of tokens per second, with deployment guides and GPU recipes
+    written for them. The curiosity became infrastructure.</p>
+</section>
+
+<!-- ============== 07 ============== -->
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Why this matters</h2>
+  <p class="drop">Diffusion language models are not (yet) here to dethrone the autoregressive
+    giants. The honest reviews of 2026 — including a few pointed "reality-check" papers — find them
+    still trailing on the hardest reasoning, and finicky to sample correctly. What they offer is a
+    different shape of trade-off, and in computing, a new trade-off is how progress sneaks in.</p>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">Dimension</div>
+      <div class="cell">Autoregressive (today's default)</div>
+      <div class="cell">Diffusion (the challenger)</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>How it writes</strong></div>
+      <div class="cell">One word at a time, left to right</div>
+      <div class="cell">Whole sentence at once, refined over a few rounds</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Cost grows with</strong></div>
+      <div class="cell">Length of the answer (1 pass per word)</div>
+      <div class="cell">Number of steps (≈10–50, any length)</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Natural strength</strong></div>
+      <div class="cell">Coherence, step-by-step reasoning</div>
+      <div class="cell">Speed, filling middles, editing in place</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Main weakness</strong></div>
+      <div class="cell">Latency on long outputs</div>
+      <div class="cell">Parallel words can disagree; reasoning still maturing</div>
+    </div>
+  </div>
+  <p>The reason to care is simple. A whole generation of AI products is bottlenecked on the same
+    thing: <span class="hl">waiting for the next word</span>. If a model can paint a paragraph in a
+    dozen passes instead of writing it in five hundred, that unlocks interfaces that feel instant —
+    and agents that can afford to take many small thinking steps. Whether diffusion wins outright or
+    simply lends its parallel trick to hybrid models, the assumption that "language models write left
+    to right" is no longer a law of nature. It is just one option.</p>
+  <div class="ornament">※ ※ ※</div>
+  <p class="marginalia">Want to go deeper? Look up the LLaDA family of open diffusion LLMs, the
+    Mercury commercial model, and the 2026 work on dependency-aware parallel decoding and test-time
+    scaling for diffusion — all freely discussed on arXiv and the usual research blogs.</p>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">The model that writes all at once.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 11, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>

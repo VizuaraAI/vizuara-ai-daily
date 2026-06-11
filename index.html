@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Vizuara AI Daily — New AI research, explained visually</title>
+<meta name="description" content="New AI research, explained simply and illustrated fully. A fresh visual deep-dive for the Vizuara AI community — one concept at a time." />
+<link rel="icon" type="image/png" href="assets/logo.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:#f4ecd8; --paper-deep:#ebe1c7; --ink:#1a1815; --ink-soft:#3d3833;
+    --ink-faint:#6b6359; --accent:#c8351b; --accent-soft:#e08a76;
+    --navy:#0a0e1a; --margin:max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html { scroll-behavior:smooth; }
+  body {
+    font-family:'Fraunces','Times New Roman',serif;
+    font-feature-settings:"ss01" on,"ss02" on,"onum" on;
+    background:var(--paper); color:var(--ink); line-height:1.55; font-size:18px;
+    overflow-x:hidden; position:relative;
+  }
+  body::after {
+    content:''; position:fixed; inset:0;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity:0.35; mix-blend-mode:multiply; pointer-events:none; z-index:1;
+  }
+  main { position:relative; z-index:2; }
+  h1,h2 { font-family:'Fraunces',serif; font-variation-settings:"opsz" 144; letter-spacing:-0.02em; line-height:1.04; font-weight:400; }
+
+  /* ---- HERO ---- */
+  .hero {
+    background:var(--navy); color:#fff; padding:5rem var(--margin) 4.5rem; text-align:center;
+    position:relative; overflow:hidden;
+  }
+  .hero img.logo { width:140px; height:140px; border-radius:26px; box-shadow:0 12px 50px rgba(0,0,0,0.5); }
+  .hero h1 {
+    color:#fff; font-size:clamp(2.8rem,7vw,5.5rem); font-weight:300; margin:1.6rem 0 0.4rem;
+    font-variation-settings:"opsz" 144,"wght" 300;
+  }
+  .hero h1 em { font-style:italic; color:var(--accent-soft); font-variation-settings:"opsz" 144,"wght" 400; }
+  .hero .tagline {
+    font-family:'Inter Tight',sans-serif; font-size:1.05rem; color:rgba(255,255,255,0.72);
+    max-width:46ch; margin:1.2rem auto 0; line-height:1.6; font-weight:300;
+  }
+  .hero .kicker {
+    font-family:'Inter Tight',sans-serif; text-transform:uppercase; letter-spacing:0.22em;
+    font-size:0.72rem; font-weight:600; color:var(--accent-soft); margin-top:0.5rem;
+  }
+
+  /* ---- ARTICLE LIST ---- */
+  .list-wrap { padding:5rem var(--margin) 6rem; }
+  .list-head {
+    font-family:'Inter Tight',sans-serif; text-transform:uppercase; letter-spacing:0.2em;
+    font-size:0.78rem; font-weight:600; color:var(--ink-faint); margin-bottom:2rem;
+  }
+  .article-row {
+    display:block; text-decoration:none; color:inherit;
+    border-top:1px solid rgba(40,30,20,0.18); padding:2rem 0; transition:padding-left 0.2s, color 0.2s;
+  }
+  .article-row:last-of-type { border-bottom:1px solid rgba(40,30,20,0.18); }
+  .article-row:hover { padding-left:0.6rem; }
+  .article-row:hover h2 { color:var(--accent); font-style:italic; }
+  .article-row .meta {
+    display:flex; gap:1rem; align-items:baseline; flex-wrap:wrap;
+    font-family:'JetBrains Mono',monospace; font-size:0.74rem; color:var(--accent);
+    text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.7rem;
+  }
+  .article-row .meta .tag { color:var(--ink-faint); border:1px solid rgba(40,30,20,0.2); padding:0.1rem 0.5rem; border-radius:2px; }
+  .article-row h2 { font-size:clamp(1.8rem,4vw,2.8rem); margin:0 0 0.6rem; transition:color 0.2s; }
+  .article-row p { font-family:'Inter Tight',sans-serif; color:var(--ink-soft); font-size:1.05rem; max-width:68ch; line-height:1.55; }
+  .article-row .go {
+    font-family:'Inter Tight',sans-serif; font-size:0.85rem; color:var(--accent);
+    margin-top:0.9rem; display:inline-block; letter-spacing:0.04em;
+  }
+
+  footer { padding:3.5rem var(--margin); background:var(--navy); color:#fff; text-align:center; }
+  footer .small-caps { font-family:'Inter Tight',sans-serif; text-transform:uppercase; letter-spacing:0.18em; font-size:0.72rem; color:var(--accent-soft); font-weight:600; }
+  footer p { color:rgba(255,255,255,0.6); font-size:0.9rem; margin-top:0.6rem; font-family:'Inter Tight',sans-serif; }
+</style>
+</head>
+<body>
+<main>
+
+  <section class="hero">
+    <img class="logo" src="assets/logo.png" alt="Vizuara AI Daily logo">
+    <h1>Vizuara <em>AI Daily</em></h1>
+    <p class="tagline">New AI research, explained simply and illustrated fully — one concept at a time, built for the community.</p>
+    <p class="kicker">A fresh visual deep-dive, every day</p>
+  </section>
+
+  <section class="list-wrap">
+    <div class="list-head">The archive</div>
+
+    <!-- ARTICLES:START — newest first; the skill prepends new entries here -->
+    <a class="article-row" href="diffusion-language-models/">
+      <div class="meta"><span>Jun 11, 2026</span><span class="tag">generation</span><span class="tag">new research</span></div>
+      <h2>Diffusion Language Models — The Model That Writes All at Once</h2>
+      <p>Every chatbot writes one word at a time. Diffusion language models throw that rule away — they start from a page of blanks and sharpen it into a sentence, many words at once. How they work, and why in 2026 they finally got fast enough to matter.</p>
+      <span class="go">Read the visual walkthrough →</span>
+    </a>
+    <!-- ARTICLES:END -->
+
+  </section>
+
+  <footer>
+    <p class="small-caps">Vizuara · AI Daily</p>
+    <p>Explained simply, illustrated fully.</p>
+  </footer>
+
+</main>
+</body>
+</html>
