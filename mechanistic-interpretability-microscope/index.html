@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>The AI Microscope — A Visual Walkthrough</title>
+<meta name="description" content="MIT Tech Review's #1 breakthrough of 2026, explained simply. How researchers peer inside a language model and find human-readable features and circuits — superposition, sparse autoencoders, and why it matters for safety." />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="The AI Microscope: how we peer inside a language model" />
+<meta property="og:description" content="Mechanistic interpretability, explained simply — superposition, sparse autoencoders, features, circuits, and why looking inside matters for safety." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/mechanistic-interpretability-microscope/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/mechanistic-interpretability-microscope/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="The AI Microscope: how we peer inside a language model" />
+<meta name="twitter:description" content="Mechanistic interpretability, explained simply — superposition, sparse autoencoders, features, circuits, and why looking inside matters for safety." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/mechanistic-interpretability-microscope/og-card.png" />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">Vol. — Interpretability</span>
+    <span class="small-caps">Jun 14, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">MIT Tech Review's #1 breakthrough of 2026</p>
+  <h1 class="anim" style="animation-delay:.15s">The AI<br><em>microscope</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">We build these models, but we don't understand them. Mechanistic interpretability is the effort to change that — to open the black box, find the concepts inside, and trace exactly how a thought forms. Here is how the microscope works.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>From tangled neurons to clean human-readable features, from features to circuits, all the way to "Golden Gate Claude" — a visual tour of how researchers learned to read a model's mind, and why it matters for keeping AI safe.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">The black box we built</a><span class="pg">the problem</span></li>
+    <li><span class="num">02</span><a href="#s2">Why neurons are confusing</a><span class="pg">superposition</span></li>
+    <li><span class="num">03</span><a href="#s3">The untangling trick</a><span class="pg">sparse autoencoders</span></li>
+    <li><span class="num">04</span><a href="#s4">Features you can turn up</a><span class="pg">Golden Gate Claude</span></li>
+    <li><span class="num">05</span><a href="#s5">From features to circuits</a><span class="pg">tracing thoughts</span></li>
+    <li><span class="num">06</span><a href="#s6">Why look inside</a><span class="pg">safety</span></li>
+    <li><span class="num">07</span><a href="#s7">The honest caveat</a><span class="pg">the limits</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>The black box we built</h2>
+  <p class="drop">Here is the strangest fact about modern AI: the people who build these models do not understand them. We know how to <em>train</em> a language model — pour in data, adjust billions of numbers until it predicts the next word well — but the thing that results is a black box. We can see what goes in and what comes out, and almost nothing about why.</p>
+  <p>Ask a model "the Golden Gate Bridge is in the city of ___" and it answers "San Francisco." Somewhere inside, across <span class="hl">billions of weights</span>, a computation happened that produced that word rather than another. But pointing to <em>where</em> that knowledge lives, or <em>how</em> the answer was assembled, was for years simply impossible. The model worked; nobody could say why.</p>
+
+  <figure>
+    <img src="figures/fig1.png" alt="The black box problem: input and output visible, internals opaque">
+    <figcaption><span class="fig-label">Fig 1</span> We see what a model says, never why. Mechanistic interpretability is the effort to build a microscope — to resolve that tangle of billions of numbers into something we can actually read.</figcaption>
+  </figure>
+
+  <p>This is what makes <strong>mechanistic interpretability</strong> — named MIT Technology Review's #1 breakthrough technology of 2026 — such a big deal. Its goal is audacious: to map the concepts inside a model and the pathways between them, the way a neuroscientist maps a brain. Not "the model is 92% accurate," but "<em>this</em> is the part that knows about bridges, and <em>here</em> is the wire that connects it to San Francisco." Let's build that microscope, one idea at a time.</p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>Why neurons are confusing</h2>
+  <p class="drop">The obvious first guess is that a model is like a tidy filing cabinet: one neuron for "cat," another for "Paris," another for "sadness." If that were true, interpretability would be easy — just read the labels. Reality is far messier. When researchers looked at individual neurons, they found each one lighting up for a <span class="hl">bizarre grab-bag</span> of unrelated things: the Golden Gate Bridge, the word "the" in Chinese, a strand of DNA, a note of melancholy — all in the same neuron.</p>
+  <p>These are called <strong>polysemantic</strong> neurons ("many meanings"), and for a long time they made the model look hopelessly tangled. The breakthrough was understanding <em>why</em> they happen.</p>
+
+  <figure>
+    <img src="figures/fig2.png" alt="Polysemantic neurons and superposition">
+    <figcaption><span class="fig-label">Fig 2</span> A single neuron fires for many unrelated concepts. The reason is superposition: the model has far more concepts to represent than it has neurons, so it packs them in by overlapping — which is exactly what makes raw neurons unreadable.</figcaption>
+  </figure>
+
+  <p>The explanation is a beautiful idea called <span class="hl-violet">superposition</span>. A model needs to represent vastly more concepts than it has neurons — millions of ideas, only thousands of neurons in a given layer. So it cheats: it stores many features <em>overlapping</em> in the same neurons, like a choir where far more singers share a small set of microphones than you'd think possible. Any single microphone picks up a jumble. The information is all there — it's just compressed and entangled. Which sets up the central puzzle: how do you un-mix the choir back into individual voices?</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>The untangling trick</h2>
+  <p class="drop">The tool that cracked this open is the <strong>sparse autoencoder</strong> (SAE), and the idea behind it is lovely. If the model has crammed many overlapping features into a few neurons, then build a second little network whose only job is to <em>spread them back out</em> — to take that dense, tangled activation and re-express it across a much wider canvas where each unit can stand for one clean thing.</p>
+  <p>"Sparse" is the magic word. The wide layer has thousands of units, but for any given input only a <span class="hl">handful light up</span>. That constraint forces the network to discover features that are genuinely distinct — because it can't afford to use many at once, each one has to mean something specific. The jumble resolves into separate voices.</p>
+
+  <figure>
+    <img src="figures/fig3.png" alt="Sparse autoencoder untangling superposition into clean features">
+    <figcaption><span class="fig-label">Fig 3</span> The sparse autoencoder expands a tangled activation into thousands of features, only a few active at a time — then reconstructs the original from them. Each lit unit now corresponds to one human-readable concept.</figcaption>
+  </figure>
+
+  <p>And there's a built-in proof that it works: the SAE must be able to <em>reconstruct</em> the model's original activation from just those few active features. If a small set of clean, separate features can rebuild the messy original, those features really are what the model was using all along. <span class="marginalia">When a feature means exactly one thing, researchers call it "monosemantic." Turning polysemantic neurons into monosemantic features is the whole game — it's what turns an unreadable model into a labeled one.</span> The microscope now has lenses.</p>
+
+  <div class="pull-quote">The neurons were never the right unit. The features hiding inside them were.</div>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Features you can turn up</h2>
+  <p class="drop">Once you can extract clean features, something wonderful becomes possible. You're no longer just <em>reading</em> the model — you can <em>reach in and turn a feature up or down</em>, like a mixing board with thousands of labeled sliders. And when you do, the model's behavior changes in exactly the way the label predicts. That's the strongest possible proof that a feature means what you think.</p>
+  <p>The famous demonstration was <span class="hl-gold">"Golden Gate Claude."</span> Researchers found the feature for the Golden Gate Bridge and cranked it to an extreme. The model became obsessed: ask it anything — "tell me about your day," "write a recipe" — and it would steer the answer toward the bridge, even claiming to <em>be</em> the bridge, its towers rising through the fog.</p>
+
+  <figure>
+    <img src="figures/fig4.png" alt="Clamping a feature to steer the model — Golden Gate Claude">
+    <figcaption><span class="fig-label">Fig 4</span> Features are knobs, not just labels. Dial the "Golden Gate Bridge" feature to its maximum and the model can't stop talking about the bridge — direct, causal proof that the feature really encodes that concept.</figcaption>
+  </figure>
+
+  <p>It's a charming party trick, but the implication is serious. The same approach surfaces features for things we actually care about: <span class="hl">unsafe code</span>, sycophantic flattery, bias, even features that activate when the model is being deceptive. If a behavior corresponds to a feature, and a feature is a knob, then behavior becomes something you can <em>measure and adjust</em> at the source — not just hope to train away. The microscope has become a control panel.</p>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>From features to circuits</h2>
+  <p class="drop">Naming the parts is only half of understanding. A watchmaker who can label every gear still hasn't explained the watch until they show how the gears <em>turn each other</em>. The 2025 leap in interpretability was exactly this: moving from a catalog of features to the <strong>circuits</strong> that wire them together — and tracing the path a model takes from prompt all the way to response.</p>
+  <p>Take the question "what is the capital of the state containing Dallas?" A model could in principle just memorize that whole question. But when researchers traced the internal activity, they found something more like genuine reasoning: a feature for <em>Dallas</em> activated a feature for <em>Texas</em>, which activated a feature for <em>the capital of Texas</em>, which produced <span class="hl-green">"Austin."</span> Two hops, in sequence, assembled on the fly.</p>
+
+  <figure>
+    <img src="figures/fig5.png" alt="An attribution graph tracing multi-step reasoning from features to answer">
+    <figcaption><span class="fig-label">Fig 5</span> Features connect into circuits. Tracing "the capital of the state containing Dallas," the model hops Dallas → Texas → Austin — visible, multi-step reasoning rather than a single memorized lookup.</figcaption>
+  </figure>
+
+  <p>This is what it means to read a model's mind, and it has produced genuine surprises — models planning ahead before writing a rhyming line, or doing arithmetic with strange improvised strategies rather than the algorithms we'd expect. <span class="marginalia">These maps are called attribution graphs: nodes are features, arrows are the influence one feature has on the next. They're the closest thing we have to a wiring diagram of a thought.</span> We are, for the first time, watching computation happen in concepts we recognize.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>Why look inside</h2>
+  <p class="drop">All of this could be a fascinating curiosity. It isn't — it's quietly becoming a safety tool, and that's the real reason it tops the 2026 lists. When a model can write code, give medical information, or act as an autonomous agent, "it usually behaves well" is not good enough. We want to know <em>why</em> it behaves, and to catch the moments it doesn't.</p>
+
+  <figure>
+    <img src="figures/fig6.png" alt="Interpretability for safety: hallucination, deception, monitoring">
+    <figcaption><span class="fig-label">Fig 6</span> Three safety payoffs: spot when a model is guessing rather than knowing, detect when its stated reasoning hides its real intent, and monitor the chain-of-thought for unsafe plans before they act.</figcaption>
+  </figure>
+
+  <p>Three payoffs stand out. <strong>Hallucination:</strong> interpretability can reveal when no internal "I know this entity" feature is firing — the model is confidently making things up, and now we can detect it. <strong>Deception:</strong> by comparing what a model <em>says</em> it's doing against which features actually fire, researchers can catch a stated reason that hides the real one. <strong>Monitoring:</strong> watching a reasoning model's internal steps can flag cheating or unsafe plans <em>before</em> the model acts on them. In each case, the move is the same — stop judging the model only by its output, and start reading its internals.</p>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>The honest caveat</h2>
+  <p class="drop">It would be a disservice to end on pure triumph, because the field is refreshingly honest about its limits. We can now extract millions of features and trace specific circuits — but a frontier model has <em>billions</em> of parameters and likely tens of millions of features. What we've mapped is a few well-lit streets in an enormous dark city.</p>
+  <p>Some serious researchers think the goal may be out of reach entirely — that these models are simply too complex for us to ever fully understand, the way we can't track every neuron in a human brain. Others believe the microscope will keep getting sharper until we can audit a model the way we audit code. The honest answer in 2026 is that nobody knows which camp is right.</p>
+
+  <div class="stat-grid">
+    <div class="stat"><span class="num">#1</span><span class="lbl">MIT TR breakthrough 2026</span></div>
+    <div class="stat"><span class="num">millions</span><span class="lbl">of features extracted</span></div>
+    <div class="stat"><span class="num">billions</span><span class="lbl">of parameters still to map</span></div>
+    <div class="stat"><span class="num">prompt→answer</span><span class="lbl">now traceable, in part</span></div>
+  </div>
+
+  <p>But the direction is unmistakable, and it reframes the whole project of AI. For a decade we built ever more capable systems we couldn't explain, and simply hoped they were safe. Mechanistic interpretability is the bet that we don't have to settle for hope — that a mind made of numbers can, with the right microscope, be read. Even a partial map changes everything: it turns "trust me, it works" into "here is what it's doing." And that, more than any benchmark, is what it will take to deploy these systems wisely.</p>
+
+  <div class="ornament">※ ※ ※</div>
+  <p style="text-align:center;max-width:44ch;margin:0 auto;font-style:italic;color:var(--ink-soft)">Inspired by MIT Technology Review's 2026 breakthrough list and Anthropic's Transformer Circuits research. Explained simply, drawn out fully.</p>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">We built minds we couldn't read. Now we're learning to read them.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 14, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
