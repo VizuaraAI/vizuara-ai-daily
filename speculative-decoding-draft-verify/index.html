@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Speculative Decoding — A Visual Walkthrough</title>
+<meta name="description" content="How a tiny 'draft' model makes a giant language model run 3-6x faster — with mathematically identical output. A visual tour of draft-then-verify, the accept/reject rule, and modern variants like Medusa and EAGLE." />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="Speculative Decoding: how a tiny model speeds up a giant one" />
+<meta property="og:description" content="Draft-then-verify, the lossless accept/reject rule, and Medusa/EAGLE — how LLMs generate text 3-6x faster with identical output. Explained simply, illustrated fully." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/speculative-decoding-draft-verify/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/speculative-decoding-draft-verify/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Speculative Decoding: how a tiny model speeds up a giant one" />
+<meta name="twitter:description" content="Draft-then-verify, the lossless accept/reject rule, and Medusa/EAGLE — how LLMs generate text 3-6x faster with identical output. Explained simply, illustrated fully." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/speculative-decoding-draft-verify/og-card.png" />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">Vol. — Inference efficiency</span>
+    <span class="small-caps">Jun 15, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">A free 3-6x speedup hiding in plain sight</p>
+  <h1 class="anim" style="animation-delay:.15s">Speculative<br><em>decoding</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">What if a tiny, fast model could guess what a giant, slow model is about to say — and the giant only had to check? That one idea makes today's LLMs run several times faster, with output that is mathematically identical. Here's how the trick works.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>It sounds too good to be true: more speed, zero quality loss. The secret is a clever accept/reject rule that turns spare, idle compute into free tokens. A visual walkthrough of draft-then-verify, why it's provably lossless, and the variants — Medusa, EAGLE — shipping in every major LLM server today.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">Why generating text is slow</a><span class="pg">the bottleneck</span></li>
+    <li><span class="num">02</span><a href="#s2">Draft, then verify</a><span class="pg">the core idea</span></li>
+    <li><span class="num">03</span><a href="#s3">Accept, reject, resample</a><span class="pg">the mechanics</span></li>
+    <li><span class="num">04</span><a href="#s4">Why it's exactly lossless</a><span class="pg">the guarantee</span></li>
+    <li><span class="num">05</span><a href="#s5">Trees, heads, and features</a><span class="pg">the variants</span></li>
+    <li><span class="num">06</span><a href="#s6">The payoff</a><span class="pg">speedups &amp; adoption</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>Why generating text is slow</h2>
+  <p class="drop">To understand the trick, you first have to understand the strange way a language model spends its time. When a model writes, it produces <em>one token at a time</em>: predict a word, append it, feed everything back in, predict the next. Each of those steps requires loading the model's entire set of weights — tens of billions of numbers — out of memory and onto the chip.</p>
+  <p>Here is the counter-intuitive part. That loading is the slow step, not the math. Modern accelerators can do arithmetic far faster than they can fetch weights from memory, so at each step the chip spends most of its time just <span class="hl">waiting for the weights to arrive</span> and very little time actually computing. Generation is, in the jargon, <span class="hl-gold">memory-bandwidth bound</span>.</p>
+
+  <figure>
+    <img src="figures/fig1.png" alt="Why decoding is memory-bandwidth bound, and the batch free lunch">
+    <figcaption><span class="fig-label">Fig 1</span> Each token forces a reload of the whole model from memory — the chip is busy fetching weights, not computing. Crucially, checking five tokens at once costs almost the same as checking one, because the expensive load happens only once.</figcaption>
+  </figure>
+
+  <p>This sets up a delicious opportunity. Because the bottleneck is loading weights — and a forward pass over <em>several</em> tokens loads those weights exactly as many times as a pass over <em>one</em> (just once) — verifying five tokens together costs almost the same wall-clock time as generating a single token. The hardware has spare compute sitting idle. Speculative decoding is, at heart, a scheme to <span class="hl">use that idle compute for free</span>.</p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>Draft, then verify</h2>
+  <p class="drop">The plan follows naturally. If one big-model pass can check many tokens as cheaply as one, then we just need <em>candidate</em> tokens to check. So we bring in a second, much smaller model — the <strong>draft model</strong>, often ten times smaller than the real one — whose only job is to guess ahead quickly.</p>
+  <p>The loop has two phases. First, the draft model rattles off a short run of <span class="hl">K candidate tokens</span> (typically 3 to 12) — cheap, because it's tiny. Then the big <strong>target model</strong> takes all those candidates and checks them in a <span class="hl-gold">single parallel forward pass</span>, confirming as many as it agrees with at once.</p>
+
+  <figure>
+    <img src="figures/fig2.png" alt="The draft-then-verify loop: small model proposes, big model verifies in one pass">
+    <figcaption><span class="fig-label">Fig 2</span> The small draft model proposes a run of tokens cheaply and sequentially; the big target model verifies them all in one parallel pass. One expensive pass can now lock in several tokens instead of just one.</figcaption>
+  </figure>
+
+  <p>The analogy is a fast junior writer sketching the next few words and a slow senior editor glancing over them. If the junior guessed well — and for common phrasing they usually do — the editor approves several words in the time it would have taken to write a single one. The whole speedup hinges on a simple question: <em>when the editor disagrees, how do we stay perfectly faithful to what the editor alone would have written?</em></p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>Accept, reject, resample</h2>
+  <p class="drop">Verification walks along the draft's run of tokens and makes one decision at each position. Roughly: if the target model would have been at least as happy to produce that token as the draft was, the token is <span class="hl-green">accepted</span>. The model marches down the run, accepting as long as draft and target agree.</p>
+  <p>At the <em>first</em> token where they disagree — where the target thinks the draft's guess was too unlikely — verification <span class="hl">stops</span>. That token is rejected, and crucially, <em>everything after it is thrown away</em>, even if some later guesses would have been fine. You can't keep them, because they were written assuming the rejected token was there.</p>
+
+  <figure>
+    <img src="figures/fig3.png" alt="Accept-reject strip: accepted run, first mismatch rejected and resampled, rest discarded">
+    <figcaption><span class="fig-label">Fig 3</span> The target accepts the matching run ("The cat sat"), rejects the first mismatch, discards everything after it, and resamples a corrected token at the rejection point — locking in several tokens for the price of one big-model pass.</figcaption>
+  </figure>
+
+  <p>Then, at that rejection point, the target model <strong>resamples</strong> a replacement token from a specially corrected distribution (more on that in a moment), and the loop starts over with a fresh draft. The accounting still wins handily: even a partial run — three or four accepted tokens before a rejection — means several tokens generated for the cost of a single target pass. <span class="marginalia">Acceptance rate is everything. The better the draft model mimics the target, the longer the accepted runs, the bigger the speedup. On predictable text ("the", "of the", boilerplate code) runs are long; on surprising text they're short.</span></p>
+
+  <div class="pull-quote">The draft model is allowed to be wrong. The accept/reject rule is what guarantees its mistakes never reach the page.</div>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Why it's exactly lossless</h2>
+  <p class="drop">This is the part that feels like a magic trick, and it's worth slowing down for. Speculative decoding doesn't produce <em>similar</em> output to the slow method, or <em>almost</em> the same — it produces output drawn from the <span class="hl">exact same probability distribution</span> as if the target model had generated every token one at a time. The speedup is genuinely free of quality cost. How?</p>
+  <p>The answer is a careful piece of probability called modified rejection sampling. For a proposed token, compare the target's probability <code>p</code> with the draft's probability <code>q</code>. If <code>p ≥ q</code>, accept it outright. If <code>p &lt; q</code> — the draft was overconfident — accept it only with probability <code>p/q</code>, and otherwise reject. And when you reject, you don't resample from <code>p</code> directly; you sample from the <span class="hl-violet">leftover distribution</span>, the positive part of <code>(p − q)</code>, renormalized.</p>
+
+  <figure>
+    <img src="figures/fig4.png" alt="The rejection-sampling rule that makes speculative decoding lossless">
+    <figcaption><span class="fig-label">Fig 4</span> The accept/reject rule in three cases. Averaged over all of them, the probability of emitting any given token works out to exactly the target's <code>p</code> — so the output distribution is provably identical to one-at-a-time decoding.</figcaption>
+  </figure>
+
+  <p>Work through the algebra and something beautiful falls out: the total probability of emitting any particular token — adding up the "accepted" path and the "rejected-then-resampled" path — comes to <em>exactly</em> <code>p</code>. The correction term <code>(p − q)</code> precisely compensates for the draft's biases. So the draft model can be crude, weird, even badly trained; it changes the <em>speed</em> but never the <em>distribution</em>. That mathematical guarantee is why production teams adopted speculative decoding so readily: there is no accuracy trade-off to argue about.</p>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Trees, heads, and features</h2>
+  <p class="drop">The basic recipe needs a separate draft model and guesses in a single straight line. Most of the research since has been about drafting <em>better</em> and <em>cheaper</em> — and three ideas stand out.</p>
+  <p>The first is to drop the second model entirely. <strong>Medusa</strong> bolts a few extra lightweight "heads" onto the target model itself, each trained to predict a token one, two, or three positions into the future. The model drafts for <span class="hl">itself</span>, no separate network to host or keep in sync.</p>
+
+  <figure>
+    <img src="figures/fig5.png" alt="Variants: Medusa heads, SpecInfer draft trees, EAGLE feature-level drafting">
+    <figcaption><span class="fig-label">Fig 5</span> Three ways to draft better: Medusa adds self-drafting heads (no second model); SpecInfer guesses a <em>tree</em> of continuations and keeps the longest that survives; EAGLE drafts in the model's internal feature space for higher acceptance.</figcaption>
+  </figure>
+
+  <p>The second idea is to hedge. Instead of one linear guess, <strong>SpecInfer</strong> proposes a small <span class="hl-violet">tree</span> of alternative continuations and lets the target verify the whole tree in parallel, keeping the longest branch that survives — so a single wrong guess early on doesn't waste the entire run. The third, <strong>EAGLE</strong>, is the cleverest: it drafts not over words but over the target model's own internal <em>feature</em> vectors (from near the top of the network), reusing the big model's representations to guess far more accurately. Higher acceptance means longer runs — which is how EAGLE-3 reaches the top of the speed charts.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>The payoff</h2>
+  <p class="drop">Put it all together and the numbers are striking — not from a bigger model or better hardware, but purely from being smart about idle compute. The original work landed 2–3× on large models; the modern feature-level variants push much further.</p>
+
+  <figure>
+    <img src="figures/fig6.png" alt="Speedup factors by method and the production systems that ship speculative decoding">
+    <figcaption><span class="fig-label">Fig 6</span> Speedups by method, from the original 2–3× up to EAGLE-3's 3–6.5×. The same idea now ships in every major serving stack — vLLM, TensorRT-LLM, SGLang — and powers products at Google, Apple, AWS, and Meta.</figcaption>
+  </figure>
+
+  <div class="stat-grid">
+    <div class="stat"><span class="num">3–6.5×</span><span class="lbl">EAGLE-3 speedup</span></div>
+    <div class="stat"><span class="num">0%</span><span class="lbl">quality lost</span></div>
+    <div class="stat"><span class="num">~10×</span><span class="lbl">smaller draft model</span></div>
+    <div class="stat"><span class="num">2024</span><span class="lbl">became production-standard</span></div>
+  </div>
+
+  <p>What makes speculative decoding such a satisfying idea is its honesty: it doesn't cut corners. It found a resource the hardware was wasting — compute that sat idle while weights loaded — and spent it on guesses, with a rejection rule strict enough to guarantee the output never drifts from what the slow method would have produced. Same answer, several times faster, no asterisk.</p>
+  <p>It's also a glimpse of where inference research is heading. As models get larger and the memory wall gets taller, the winners increasingly aren't the ones doing <em>more</em> computation, but the ones doing the <em>same</em> computation more cleverly. A tiny model whispering guesses to a giant one is exactly that kind of cleverness — and it's now quietly running underneath a great deal of the AI you use every day.</p>
+
+  <div class="ornament">※ ※ ※</div>
+  <p style="text-align:center;max-width:44ch;margin:0 auto;font-style:italic;color:var(--ink-soft)">A visual explainer of speculative decoding and its EAGLE-era variants. Explained simply, drawn out fully.</p>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">The fastest way to compute is often to guess well, then check.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 15, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
