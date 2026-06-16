@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Recursive Language Models — A Visual Walkthrough</title>
+<meta name="description" content="Recursive Language Models (RLMs) store a giant prompt as a variable in a Python REPL and let an LLM recursively call itself on the pieces — beating a frontier model on long context, cheaper, at 10M+ tokens. A visual walkthrough." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="Recursive Language Models, explained visually" />
+<meta property="og:description" content="Store the prompt as a variable, write code to probe it, recurse on the pieces. How a cheaper model out-reads a frontier one on long context — and keeps working at 10M+ tokens." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/recursive-language-models/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/recursive-language-models/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Recursive Language Models, explained visually" />
+<meta name="twitter:description" content="Store the prompt as a variable, write code to probe it, recurse on the pieces. How a cheaper model out-reads a frontier one on long context — and keeps working at 10M+ tokens." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/recursive-language-models/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 6 — Long-context inference</span>
+    <span class="small-caps">Jun 16, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">When the context window stops being the limit</p>
+  <h1 class="anim" style="animation-delay:.15s">Recursive<br>Language <em>Models</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">What if a model never read your million-token prompt at all — but stored it as a variable, wrote code to probe it, and recursively called smaller copies of itself on just the pieces that mattered? That one move lets a cheaper model out-read a frontier one.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>From Zhang, Kraska &amp; Khattab (MIT CSAIL, late 2025). Instead of fixing <em>context rot</em> with a bigger window, RLMs sidestep it: the long prompt lives in a Python REPL, and the model decides — at test time — how to slice, search, and recurse over it. The reach is roughly two orders of magnitude beyond the model's own context window.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">The wall every long prompt hits</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">What if the prompt were a variable?</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">A toolkit for reading without reading</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">The recursive leap</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">Why clean beats crammed</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">The receipts</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">What this unlocks</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>The wall every long prompt hits</h2>
+  <p class="drop">For three years the story of large language models has been a story about <span class="hl">bigger windows</span>. Four thousand tokens became thirty-two thousand, then two hundred thousand, then a million. The promise was simple and seductive: paste in the whole codebase, the entire deposition, every email from the quarter — and just ask. If the model can see everything, surely it can answer anything.</p>
+  <p>It turns out that seeing everything is not the same as understanding it. As you push more tokens into a single forward pass, the model gets quietly, measurably worse at finding the fact you actually need. Anthropic gave the effect a memorable name: <em>context rot</em> — "as the number of tokens in the context window increases, the model's ability to accurately recall information from that context decreases." The window is full, but attention is spread thin.</p>
+  <p>You can watch it happen. Hide a single sentence — the proverbial needle — inside a haystack of a few thousand tokens and the model finds it every time. Bury the same sentence in two hundred thousand tokens and it starts to slip. The bar fills up; the recall curve bends down.</p>
+  <figure>
+    <img src="figures/fig1.png" alt="A diagram showing recall accuracy falling as more tokens fill a single LLM's context window — the needle fact gets lost.">
+    <figcaption><span class="fig-label">Fig 1</span> Context rot: as a single window fills, recall of the right fact decays. More tokens is not more understanding.</figcaption>
+  </figure>
+  <p>So the field had a choice. Option one: keep fighting the architecture — better positional schemes, sparser attention, longer training — to make the giant pass degrade a little more gracefully. Option two, the one we're here for: <span class="hl-gold">stop forcing the model to read everything at once.</span></p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>What if the prompt were a variable?</h2>
+  <p class="drop">Here is the reframe that makes Recursive Language Models work, and it is small enough to fit in a sentence: the long context is not a prompt the model must read — it's <span class="hl">a variable the model can query.</span></p>
+  <p>Concretely, the entire context is loaded into the memory of a Python REPL — an interactive notebook — as a single variable, say <code>ctx</code>. The root model is <em>not</em> handed those millions of tokens. It is handed only the user's question and a live coding environment, and told: the answer is somewhere inside <code>ctx</code>; write code to go find it.</p>
+  <p>Think about what that changes. A normal model reads the whole haystack and hopes to remember the needle. The root RLM never sees the haystack. It writes <code>ctx[:2000]</code> to peek at the opening, runs <code>grep(ctx, "Q3 revenue")</code> to jump to the relevant lines, checks <code>len(ctx)</code> to gauge the size — and only short, truncated outputs of those commands ever come back into its own context.</p>
+  <div class="marginalia">Because the root model only ever sees the <em>results</em> of its own commands, its context grows slowly. It can orchestrate a search over ten million tokens while its own window stays nearly empty.</div>
+  <figure>
+    <img src="figures/fig2.png" alt="The root LM holds only the question and writes Python against a REPL where the full prompt sits as a sealed variable ctx; only small outputs return.">
+    <figcaption><span class="fig-label">Fig 2</span> The reframe: the prompt becomes a variable in a REPL. The root model programs the context instead of reading it.</figcaption>
+  </figure>
+  <p>When it has the answer, the model emits a <code>FINAL(answer)</code> tag — or <code>FINAL_VAR(name)</code> if the answer is something it has already assembled inside the notebook. From the outside, none of this is visible. You call it like any other model: <code>rlm.completion(messages)</code>. The recursion hides behind the same clean API you already use.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>A toolkit for reading without reading</h2>
+  <p class="drop">Once you accept that the model is a programmer poking at a variable rather than a reader scanning a page, a small but powerful toolkit falls out naturally. None of it is hand-coded into a rigid pipeline; the model chooses which tool to reach for, at test time, by writing ordinary Python.</p>
+  <p><strong>Peek</strong> — sample the first couple thousand characters to learn what kind of document this even is. <strong>Grep / regex</strong> — instead of fuzzy semantic retrieval, look for literal keywords and patterns, the way a developer searches a log. <strong>Slice</strong> — once it knows roughly where the answer lives, cut out the exact span with <code>ctx[a:b]</code>. <strong>Chunk / partition</strong> — split an unwieldy block into digestible pieces. <strong>Map</strong> — run the same operation across every chunk.</p>
+  <figure>
+    <img src="figures/fig3.png" alt="A toolkit of operations — peek, grep, slice, chunk, map — acting on a large context block the model cannot read in full.">
+    <figcaption><span class="fig-label">Fig 3</span> The toolkit. The model navigates text like a programmer — peeking, grepping, slicing, partitioning — never reading the whole thing.</figcaption>
+  </figure>
+  <p>This is the quiet superpower of the REPL framing. A retrieval system has to embed the whole corpus in advance and hope its similarity scores surface the right passage. The RLM can just <span class="hl-green">search for the word</span>. If you ask about "the indemnification clause," it greps for "indemnif" and lands on the paragraph — no vector database, no chunking strategy decided up front, no semantic drift.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>The recursive leap</h2>
+  <p class="drop">So far the root model can search and slice. But what happens when a single chunk is itself too big to reason about — a hundred pages that all look relevant? This is where the "recursive" in Recursive Language Models earns its name.</p>
+  <p>The environment exposes one more tool: <code>llm_query(question, chunk)</code>. When the root model calls it, it spawns a <em>fresh</em> language model — in the paper, often a cheaper one like GPT-5-mini — on just that chunk, with just that sub-question, in a brand-new clean context. That sub-model reads its small slice, answers, and hands a short summary back up. The root model collects those mini-answers and combines them.</p>
+  <p>It is, quite literally, a model deciding to call a model. The root orchestrates; the children do the close reading; nobody ever holds the whole thing at once. In the current implementation the recursion goes one level deep — depth 1 — but the authors note that going deeper "is a relatively easy change."</p>
+  <figure>
+    <img src="figures/fig4.png" alt="A recursion tree: the root LM partitions the context into chunks, calls a fresh sub-LM on each, and combines the returned mini-answers into a final answer.">
+    <figcaption><span class="fig-label">Fig 4</span> The recursive leap. Partition the context, call a fresh clean sub-model on each piece, combine the answers. The model breaks the problem down for itself.</figcaption>
+  </figure>
+  <p>That last phrase is the whole philosophy, and it is worth slowing down for. An agent framework is a human's guess at how to decompose a task — a fixed graph of steps an engineer designed. An RLM hands the decomposition back to the only thing that actually knows how hard each piece is: the model.</p>
+  <div class="pull-quote">Agents break a problem down the way a human thinks a model should. RLMs let the model decide how to break the problem down for itself.</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Why clean beats crammed</h2>
+  <p class="drop">Why should any of this beat simply giving a powerful model the whole context? The deepest reason is about <span class="hl">distribution</span>. A model is trained on sequences up to some length. A ten-million-token prompt is not just large — it is <em>off the map</em>, far outside anything the model saw in training. Asking it to reason there is asking it to extrapolate.</p>
+  <p>The RLM keeps every individual call short. The root model's window holds a question and a few command outputs. Each sub-model's window holds one tidy chunk. Every single forward pass stays in the comfortable, well-trained regime — the regime where models are sharp. The length problem is dissolved into many length-safe problems.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="Side by side: a single bloated out-of-distribution context window that rots, versus many small clean in-distribution windows orchestrated by a thin root model.">
+    <figcaption><span class="fig-label">Fig 5</span> Clean beats crammed. One giant pass runs off the edge of training; many short calls each stay in familiar territory.</figcaption>
+  </figure>
+  <p>There is a second, lovely benefit: <span class="hl-violet">you can read the reasoning.</span> Because the model's strategy is just executed Python, every grep, every slice, every recursive call is logged. Unlike a black-box thousand-token internal monologue, you can see exactly how the model chose to attack your document — which is a gift for debugging and for trust.</p>
+  <div class="ornament">※ ※ ※</div>
+  <p>None of this is free. Each recursive call is blocking and skips prefix caching, so latency is unpredictable — a query can finish in seconds or grind for minutes depending on how the model partitions. And the model still stumbles on tasks that need exhaustive counting across the whole context, where you genuinely cannot afford to miss a single piece. The trick buys breadth of reach, not omniscience.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>The receipts</h2>
+  <p class="drop">The claim sounds almost too tidy — a cheap model wrapped in a loop beating a frontier model — so the numbers matter. On <strong>OOLONG</strong>, a long-context reasoning benchmark, at around 132k tokens, <span class="hl">RLM(GPT-5-mini) scored about 34 points higher than GPT-5 itself</span> — better than double the performance — at roughly the same cost per query. Push to 263k tokens and the wrapped small model still led by about 15 points, and was now <em>cheaper</em> per query on average.</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">+34</span><span class="lbl">points over GPT-5 on OOLONG @132k</span></div>
+    <div class="stat"><span class="num">~91%</span><span class="lbl">accuracy at 10M+ tokens (BrowseComp-Plus)</span></div>
+    <div class="stat"><span class="num">100×</span><span class="lbl">beyond the model's context window</span></div>
+  </div>
+  <p>The second benchmark, <strong>BrowseComp-Plus</strong>, is where the scale becomes vivid. Its tasks run to roughly 6–11 million tokens of input — so much that the base model simply cannot be run on them; they do not fit. The RLM variant reached about <span class="hl-green">91% accuracy</span> and, crucially, did not degrade as the token count climbed past ten million. Where the recursion was switched off as an ablation, accuracy dropped — confirming the recursive calls, not just the REPL, were doing the work.</p>
+  <figure>
+    <img src="figures/fig6.png" alt="Two bar comparisons: on OOLONG at 132k tokens RLM(GPT-5-mini) beats GPT-5 by 34 points at similar cost; on BrowseComp-Plus the base model can't fit 10M+ tokens while the RLM reaches about 91%.">
+    <figcaption><span class="fig-label">Fig 6</span> The receipts. A cheaper small model, wrapped in recursion, beats a frontier model on long context — and keeps working where the frontier model cannot even fit.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">Approach</div>
+      <div class="cell">What it does with a huge prompt</div>
+      <div class="cell">Where it breaks</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Bigger window</strong></div>
+      <div class="cell">Reads everything in one forward pass</div>
+      <div class="cell">Context rot; can't exceed the window at all</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Retrieval (RAG)</strong></div>
+      <div class="cell">Pre-embeds the corpus, pulls top matches</div>
+      <div class="cell">Misses what semantic search doesn't surface</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Recursive LM</strong></div>
+      <div class="cell">Stores it as a variable; greps, slices, recurses</div>
+      <div class="cell">Unpredictable latency; exhaustive counting</div>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>What this unlocks</h2>
+  <p class="drop">The reason RLMs feel significant is that they add a <em>new axis</em> to the toolbox. We already had two ways to spend extra inference: let a model think longer (reasoning) and let it take actions in a loop (agents). Recursion is a third — spend compute on <span class="hl-gold">decomposing the input itself</span>, with the model in charge of the decomposition.</p>
+  <p>It is already spreading. In early 2026 Prime Intellect released <code>RLMEnv</code>, an environment for training long-horizon agents on exactly this recursive-context pattern — turning the test-time trick into something you can optimize for directly. The natural next steps write themselves: recursion deeper than one level, prefix caching to tame the latency, and learned policies for when to grep versus when to recurse.</p>
+  <p>But the bigger idea is the one to carry away. For years we treated the context window as a container to be enlarged. Recursive Language Models treat it as a <em>filesystem to be navigated</em> — and the moment you make that switch, "how long is your context window?" stops being the question that matters. The model brings its own scissors.</p>
+  <div class="marginalia">One concept, explained simply. If a million-token prompt now feels less like a wall and more like a directory to <code>grep</code>, the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">The window was never the limit — the model just needed a way to read past it.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 16, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
