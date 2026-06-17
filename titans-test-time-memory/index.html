@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Titans — Learning to Remember at Test Time — A Visual Walkthrough</title>
+<meta name="description" content="Google's Titans give a model a long-term memory that learns WHILE it runs — writing down only what's surprising, with momentum and forgetting. A visual walkthrough of test-time memory, the surprise signal, MAC/MAG/MAL, and how a small model out-reasons GPT-4 over 2M+ tokens." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="Titans: Learning to Remember at Test Time" />
+<meta property="og:description" content="A model with a long-term memory that learns while it runs — storing only the surprising, with momentum and forgetting. How a small model out-reasons GPT-4 over 2M+ tokens." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/titans-test-time-memory/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/titans-test-time-memory/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Titans: Learning to Remember at Test Time" />
+<meta name="twitter:description" content="A model with a long-term memory that learns while it runs — storing only the surprising, with momentum and forgetting. How a small model out-reasons GPT-4 over 2M+ tokens." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/titans-test-time-memory/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 7 — Memory &amp; architecture</span>
+    <span class="small-caps">Jun 17, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">Teaching a model to remember while it reads</p>
+  <h1 class="anim" style="animation-delay:.15s">Learning to<br><em>remember</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">Every chatbot you've used has amnesia — once a fact scrolls out of its window, it's gone. Google's Titans give a model a second kind of memory: a little neural network that keeps learning <em>while it runs</em>, writing down only what surprises it. Here's how a small model with a memory out-reasons giants across two million tokens.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>From Behrouz, Zhong &amp; Mirrokni (Google Research). Titans pairs the precise short-term memory of attention with a deep <em>long-term</em> memory that updates by gradient descent at inference — gated by a brain-like "surprise" signal, with momentum and adaptive forgetting. The unifying theory behind it, MIRAS, argues every sequence model is secretly the same thing: an associative memory.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">Two kinds of memory, each half a brain</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">Memory that learns as it reads</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">Surprise: what's worth keeping</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">Momentum and forgetting</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">Three ways to give a model a memory</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">The payoff</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">It was all memory all along</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>Two kinds of memory, each half a brain</h2>
+  <p class="drop">Ask a language model about something you said forty thousand words ago and you'll often hit a wall. The model isn't being lazy — it has a specific kind of memory, and that memory has limits. Understanding those limits is the whole reason Titans exist, so it's worth being precise about them.</p>
+  <p>The memory inside a normal Transformer is <span class="hl">attention</span>. It is astonishingly precise: every token can look directly at every other token in the window, so nothing inside that window is blurred or approximated. But that precision is expensive — the cost grows with the <em>square</em> of the length — and the moment a token falls outside the window, it simply ceases to exist for the model. It's a brilliant short-term memory with a hard edge.</p>
+  <p>The usual alternative — linear RNNs and state-space models like Mamba-2 — fixes the cost. They stream through text cheaply, in linear time, never hitting a wall. But they pay for it by cramming everything they've ever seen into <span class="hl">one fixed-size state</span>. Squeeze a whole book into a single small vector and the early chapters arrive as a blur.</p>
+  <figure>
+    <img src="figures/fig1.png" alt="Two panels: attention as a small precise window with quadratic cost, versus a linear RNN squashing a long stream into one fixed-size blurry state.">
+    <figcaption><span class="fig-label">Fig 1</span> Two kinds of memory. Attention is precise but has a tiny, expensive window; linear models are cheap and endless but blur the past into one fixed state.</figcaption>
+  </figure>
+  <p>The human brain, the Titans authors point out, doesn't choose. It runs a <span class="hl-gold">short-term memory and a long-term memory</span> side by side — one sharp and fleeting, one durable and compressed. The question driving Titans is disarmingly simple: <em>why not give a model both?</em></p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>Memory that learns as it reads</h2>
+  <p class="drop">Here is the move that makes Titans different, and it is genuinely strange the first time you meet it. The long-term memory is not a buffer of stored tokens, and it is not a vector. It is <span class="hl">a small neural network</span> — a little multi-layer perceptron — and its <em>weights</em> are the memory.</p>
+  <p>Storing a fact means nudging those weights. As the model reads your document at inference time, the memory module performs a tiny gradient-descent step on each new piece of information, literally <span class="hl-violet">training itself on your input as it goes</span>. The authors call this <em>test-time memorization</em>: the ability to keep learning while running, with no offline retraining.</p>
+  <div class="marginalia">This is the part that breaks people's intuition. We're taught that a model's weights freeze the moment training ends. Titans keep a small set of weights deliberately <em>unfrozen</em> — they change with every document the model reads.</div>
+  <figure>
+    <img src="figures/fig2.png" alt="A small MLP whose weights are the memory; incoming tokens trigger a gradient update that writes information into the weights at test time, contrasted with a frozen normal model.">
+    <figcaption><span class="fig-label">Fig 2</span> The big idea: the long-term memory is a tiny network that keeps training on the input as it reads — unlike a normal model, whose weights freeze after training.</figcaption>
+  </figure>
+  <p>Why a whole network instead of a vector? Expressive power. A single fixed state can only hold so much before it saturates; a deep little network can <span class="hl">summarise large volumes of information</span> and still keep the threads that connect tokens far apart. In the paper's ablations, the deeper the memory, the lower the perplexity — more layers, better recall.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>Surprise: what's worth keeping</h2>
+  <p class="drop">A memory that tried to store every token would fill up instantly and learn nothing. So Titans need a filter — a way to decide, token by token, what actually deserves to be written down. Their answer borrows straight from how your own memory works.</p>
+  <p>You forget the thousand ordinary moments of your morning commute. You vividly remember the one time a car swerved in front of you. <span class="hl">The brain remembers what breaks the pattern.</span> Titans measure exactly that, and they measure it with the one quantity the memory already produces: the gradient.</p>
+  <p>When a new token arrives, the memory network checks how wrong its current prediction is. If the token is expected, the error — and therefore the <em>gradient</em> — is small, and the model can safely skip it. If the token breaks the pattern, the gradient is large. That gradient magnitude <em>is</em> the surprise signal, and only the surprising tokens trigger a real write to memory.</p>
+  <div class="formula">surprise(token) = <em>‖ gradient of the memory's loss ‖</em> &nbsp;→&nbsp; small = skip · large = store</div>
+  <figure>
+    <img src="figures/fig3.png" alt="A stream of tokens under a surprise gauge; routine tokens read low and are skipped, pattern-breaking tokens peg the gauge high and get written to long-term memory.">
+    <figcaption><span class="fig-label">Fig 3</span> Surprise as a filter. Expected tokens produce small gradients and are skipped; pattern-breaking tokens produce large gradients and get written down.</figcaption>
+  </figure>
+  <p>It's an elegant trick: the same number that tells the network <em>how to learn</em> (the gradient) also tells it <em>what is worth learning</em>. No extra scorer, no separate model — surprise falls out of the math for free.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Momentum and forgetting</h2>
+  <p class="drop">Raw surprise is a good start, but on its own it's too twitchy. Two refinements — both, again, lifted from how real memory behaves — turn it into something usable.</p>
+  <p>The first is <span class="hl">momentum</span>. A surprising event is rarely a single token; the moment that follows it matters too. After the car swerves, you remember the seconds afterward — your heart pounding, the horn, pulling over. So Titans let surprise <em>carry forward</em>: a spike doesn't just store one token, it keeps memory receptive for the tokens that follow, capturing the whole surprising episode rather than an isolated word.</p>
+  <p>The second is <span class="hl-green">forgetting</span>. Memory is finite; if you only ever write, you eventually overflow. Titans add an adaptive <em>forgetting gate</em> — effectively a weight decay — that gently fades information the model no longer needs, freeing room for what's ahead. As the authors put it, the ability to forget is just as important as the ability to remember.</p>
+  <figure>
+    <img src="figures/fig4.png" alt="A memory-importance curve over a token timeline: a surprise spike with a momentum tail keeping it elevated, then a gentle decay through a forgetting gate, with momentum and forget-rate dials.">
+    <figcaption><span class="fig-label">Fig 4</span> Momentum keeps the whole surprising moment, not just one token; the forgetting gate fades stale information so a finite memory never overflows.</figcaption>
+  </figure>
+  <div class="pull-quote">A memory worth having is built as much from what it lets go as from what it holds on to.</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Three ways to give a model a memory</h2>
+  <p class="drop">So we have a neural long-term memory that writes the surprising, carries momentum, and forgets the stale. The last question is plumbing: where, exactly, does it sit relative to the attention the model already has? Titans offer three answers, plus one extra ingredient.</p>
+  <p>That extra ingredient is <span class="hl-gold">persistent memory</span> — a set of fixed, learned weights that hold general, task-level knowledge, independent of any particular input. Think of it as the model's permanent know-how, sitting alongside the short-term attention and the adaptive long-term memory.</p>
+  <p>The three wirings differ in how the long-term memory meets attention. In <strong>Memory as Context (MAC)</strong>, the memory summarises everything seen so far and hands that summary to attention as extra context — like a research assistant sliding a briefing across the desk, which attention can read or ignore. In <strong>Memory as Gate (MAG)</strong>, attention and memory run as two parallel streams, blended by a gate. In <strong>Memory as Layer (MAL)</strong>, the memory is simply stacked in as its own layer in the network.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="Three architecture variants — MAC, MAG, MAL — showing how the neural long-term memory combines with attention and persistent memory.">
+    <figcaption><span class="fig-label">Fig 5</span> Same memory, three recipes. As context (a briefing for attention), as a gate (parallel streams blended), or as a layer (baked into the stack).</figcaption>
+  </figure>
+  <p>The point of offering three isn't indecision — it's that "give the model a memory" is a design space, not a single switch. Different tasks reward different couplings of fast precise recall and slow durable memory.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>The payoff</h2>
+  <p class="drop">A clever mechanism is only worth as much as what it unlocks, so the numbers are the test. The headline is reach: Titans scale effectively to context windows beyond <span class="hl">two million tokens</span> — the territory of whole documents and genomes — while keeping the linear, parallelisable speed of a recurrent model rather than the quadratic cost of attention.</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">2M+</span><span class="lbl">tokens of effective context</span></div>
+    <div class="stat"><span class="num">&gt; GPT-4</span><span class="lbl">on BABILong, far fewer params</span></div>
+    <div class="stat"><span class="num">&gt; Mamba-2</span><span class="lbl">&amp; Gated DeltaNet on long context</span></div>
+  </div>
+  <p>And reach is nothing without retention. On <strong>BABILong</strong> — a brutal benchmark that hides facts deep inside very long contexts and asks the model to reason across them — Titans <span class="hl-green">outperform every baseline, including GPT-4</span>, despite having a small fraction of the parameters. Across standard language modelling and zero-shot reasoning, they also beat the strongest linear-memory models of the moment, Mamba-2 and Gated DeltaNet.</p>
+  <figure>
+    <img src="figures/fig6.png" alt="A context-length ruler past 2,000,000 tokens, plus bar comparisons showing small Titans beating GPT-4 on BABILong and outperforming Mamba-2 and Gated DeltaNet.">
+    <figcaption><span class="fig-label">Fig 6</span> The payoff. Past 2M tokens, a small Titans model out-reasons GPT-4 on extreme long-context tasks and beats the best linear-memory models.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">Memory style</div>
+      <div class="cell">How it holds the past</div>
+      <div class="cell">The catch</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Attention</strong></div>
+      <div class="cell">Every token sees every token, exactly</div>
+      <div class="cell">Quadratic cost; nothing past the window</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Linear RNN / SSM</strong></div>
+      <div class="cell">One fixed-size running state</div>
+      <div class="cell">Cheap, but blurs the distant past</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Titans</strong></div>
+      <div class="cell">A network that learns the surprising at test time</div>
+      <div class="cell">Extra machinery; a memory to tune</div>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>It was all memory all along</h2>
+  <p class="drop">The deepest idea here isn't Titans the architecture — it's the lens that comes with it. Alongside Titans, Google introduced <span class="hl-violet">MIRAS</span>, a framework with a provocative claim: nearly every breakthrough in sequence modelling, from attention to Mamba to Titans, is secretly the same thing — <em>an associative memory module</em> wearing different clothes.</p>
+  <p>MIRAS says any such module is just four design choices: the <em>memory architecture</em> (a vector, a matrix, or a deep network), the <em>attentional bias</em> (what it tries to learn), the <em>retention gate</em> (how it forgets), and the <em>memory algorithm</em> (how it updates). Pick differently and you rediscover old models — or invent new ones. It even frees memory from the usual squared-error objective: variants like <code>YAAD</code> use a gentler Huber loss so a single typo doesn't derail the memory, while others tighten it for stability.</p>
+  <p>That reframing is the part to carry away. For years "context length" was a number on a spec sheet. Titans suggest the better question is about the <em>quality</em> of a model's memory — what it chooses to store, what it lets fade, and how it keeps learning after training is over. The era of the frozen, forgetful model may be ending; the one that follows is built, quite literally, to remember.</p>
+  <div class="marginalia">One concept, explained simply. If "give the model a memory" now sounds less like science fiction and more like four concrete design choices, the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">The model stops forgetting the moment you let a few of its weights keep learning.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 17, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
