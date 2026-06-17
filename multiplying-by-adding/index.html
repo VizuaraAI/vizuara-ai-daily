@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Multiply by Adding — The Log-Domain Chip — A Visual Walkthrough</title>
+<meta name="description" content="Tensordyne's Napier chip revives a 1962 trick: store numbers as logarithms so every multiply becomes an add, shrink the multipliers, and spend the freed silicon on memory. A visual walkthrough of log-domain AI math, the Mitchell approximation, and an honest read of the 13x claim." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="Multiply by Adding: the log-domain AI chip" />
+<meta property="og:description" content="Tensordyne's Napier chip revives a 1962 trick — turn every multiply into an add with logarithms, shrink the multipliers, spend the silicon on memory. The idea, the catch, and an honest read of the 13x claim." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/multiplying-by-adding/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/multiplying-by-adding/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Multiply by Adding: the log-domain AI chip" />
+<meta name="twitter:description" content="Tensordyne's Napier chip revives a 1962 trick — turn every multiply into an add with logarithms, shrink the multipliers, spend the silicon on memory. The idea, the catch, and an honest read of the 13x claim." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/multiplying-by-adding/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 8 — AI hardware</span>
+    <span class="small-caps">Jun 18, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">A chip that does its arithmetic in the log domain</p>
+  <h1 class="anim" style="animation-delay:.15s">Multiply by<br><em>adding</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">A multiplier is one of the most expensive things on a chip. So Tensordyne's new Napier processor dusts off a trick from 1962: store every number as a logarithm, and multiplication turns into addition. The multipliers shrink, the freed silicon becomes memory — and a 412-year-old idea takes a swing at Nvidia.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>Everyone who tried log-domain arithmetic before gave up at the same wall: addition. Tensordyne (formerly Recogni, which first shipped this math in 7nm for self-driving cars) claims a cheap fix — and a 3nm datacenter chip that beats an Nvidia GB300 rack by 13&times; on tokens per second. We'll explain the idea, the catch, the fix, and then read that 13&times; honestly.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">Why a multiply costs so much more than an add</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">The old shortcut: multiply becomes add</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">The catch that killed it for sixty years</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">An old approximation, cheaply corrected</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">Napier: shrink the math, grow the memory</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">Now read the 13&times; honestly</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">So — is it real?</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>Why a multiply costs so much more than an add</h2>
+  <p class="drop">Strip an AI accelerator down to what it actually does all day and you find one operation repeated trillions of times: <span class="hl">multiply two numbers, add the result to a running total.</span> That's a matrix multiply, and a matrix multiply is most of what a neural network is. So the economics of the whole chip come down to a deceptively small question — how much does it cost, in silicon and in power, to do one multiply and one add?</p>
+  <p>The two are not remotely equal. An <em>adder</em> is cheap: its size grows roughly in proportion to the number of bits it handles — double the bits, double the adder. A <em>multiplier</em> is a monster: its area grows closer to the <em>square</em> of the bit width, because under the hood it builds and sums a whole grid of partial products. Go from 8-bit to 16-bit numbers and the adder doubles, but the multiplier roughly quadruples.</p>
+  <figure>
+    <img src="figures/fig1.png" alt="A graph showing multiplier area growing quadratically with bit width while adder area grows linearly, plus a large multiplier tile next to a tiny adder tile.">
+    <figcaption><span class="fig-label">Fig 1</span> The asymmetry that drives everything: multipliers scale with roughly the square of bit width, adders only linearly. Shrink the multipliers and you reclaim most of the chip.</figcaption>
+  </figure>
+  <p>Multiply that single tile by the millions packed into an accelerator and you see the prize clearly. If you could somehow do the matmul <span class="hl-gold">without the multipliers</span>, you'd reclaim a huge fraction of the silicon and the power budget. That is exactly what Tensordyne is chasing — and the route there runs through a piece of seventeenth-century mathematics.</p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>The old shortcut: multiply becomes add</h2>
+  <p class="drop">In 1614, John Napier published the logarithm for one practical reason: to spare astronomers the agony of multiplying enormous numbers by hand. The logarithm has a magical property — it converts multiplication into addition. And the chip in this story is named, fittingly, <span class="hl">Napier</span>.</p>
+  <div class="formula">log(a &times; b) = <em>log(a) + log(b)</em></div>
+  <p>Read that slowly, because the entire bet rests on it. If you store your numbers as their logarithms, then to multiply two of them you simply <em>add</em> their logs. The expensive multiplier disappears; in its place sits a cheap adder. Convert your numbers to the log domain once, run the whole matrix multiply there as additions, and convert back at the end.</p>
+  <figure>
+    <img src="figures/fig2.png" alt="The identity log(a×b)=log(a)+log(b) as a hero equation, with a pipeline: numbers → convert to log → add → convert back, and the multiplier crossed out in favor of an adder.">
+    <figcaption><span class="fig-label">Fig 2</span> In the log domain, multiplication <em>is</em> addition. Convert once, do the matmul with cheap adders, convert back — and the costly multipliers vanish.</figcaption>
+  </figure>
+  <p>Engineers have known this since at least 1962, when a researcher named Mitchell showed how to do it directly on binary numbers. It is one of the most-attempted ideas in computer arithmetic. And for sixty years it kept failing at the same spot — for a reason that is almost poetic.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>The catch that killed it for sixty years</h2>
+  <p class="drop">Here is the cruel twist. Logarithms turn multiplication into addition — but they turn <em>addition</em> into something horrible. Once your numbers live in the log domain, you can no longer add them by adding. To compute <code>a + b</code> when you're holding <code>log(a)</code> and <code>log(b)</code>, you need a <span class="hl">nonlinear function</span> that, in hardware, usually means a lookup table consulted on every single operation.</p>
+  <p>For some workloads that's fine — if your math is almost all multiplies, you rarely pay the addition tax. But remember what a matmul actually is: multiply <em>and</em> accumulate. It's a roughly <span class="hl">50/50 split of multiplies and adds</span>. You make the multiplies nearly free, and then the additions — now the expensive operation — quietly eat back everything you saved.</p>
+  <figure>
+    <img src="figures/fig3.png" alt="Two rows: multiplying in the log domain is easy (just an add, green check); adding in the log domain is hard (nonlinear, needs a lookup table, red X). A 50/50 matmul bar shows the adds eating the savings.">
+    <figcaption><span class="fig-label">Fig 3</span> The wall everyone hit: in the log domain, multiplies are trivial but additions become nonlinear lookups. Since a matmul is half additions, the savings evaporate.</figcaption>
+  </figure>
+  <p>This is why the idea was a graveyard. It looked brilliant on a slide and died in the addition. So the real question isn't "can you multiply by adding?" — that part is easy. It's: <span class="hl-gold">can you make the additions cheap again?</span></p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>An old approximation, cheaply corrected</h2>
+  <p class="drop">Tensordyne's answer starts with the oldest trick in the book — the <em>Mitchell approximation</em>. Converting to and from the log domain involves the curve <code>log2(1 + x)</code>, and Mitchell's shortcut just replaces that gentle curve with a straight line: <code>log2(1 + x) ≈ x</code>. No table, no fuss. The problem is accuracy. The straight line always sits on the same side of the true curve, so the error is <span class="hl">one-sided</span> — and one-sided errors don't cancel. Strung across a long dot product, they pile up in the same direction until the answer drifts.</p>
+  <p>The fix is the clever part, and it's almost anticlimactic. Instead of an expensive correction — a Taylor series, a lookup table — Tensordyne bolts on <span class="hl-green">cheap corrections</span>: bit shifts, truncations, a little rounding. Operations a chip can do practically for free. Those nudges push the straight line back toward the true curve and cut the average error by roughly <span class="hl">100&times;</span>.</p>
+  <figure>
+    <img src="figures/fig4.png" alt="The Mitchell approximation: true log2(1+x) curve vs the straight-line approximation, the one-sided error between them, then cheap corrections snapping the line onto the curve for ~100x lower error; flow: multiply in log, convert back, accumulate in linear.">
+    <figcaption><span class="fig-label">Fig 4</span> Start from Mitchell's one-sided approximation, then add shift-and-round corrections — no tables, no Taylor series — to cut average error ~100&times;.</figcaption>
+  </figure>
+  <p>The recipe that falls out is tidy: <span class="hl">multiply in the log domain, convert back, and accumulate in plain linear arithmetic.</span> The additions happen in normal numbers, where they're cheap, so the log-domain addition catastrophe never arrives. And because the conversion is accurate enough, you can run an already-trained model on this hardware <em>as-is</em> — no retraining, no recalibration. Tensordyne calls its particular flavor of this the "Pareto" number system.</p>
+  <div class="pull-quote">Turning multiply into add was always the easy half. The forty-year problem was the addition.</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Napier: shrink the math, grow the memory</h2>
+  <p class="drop">So what do you build once your compute units are tiny? You spend the savings on the thing modern AI is actually starved for: <span class="hl">memory</span>. That's the shape of Napier. It's a TSMC 3nm chip with 138 billion transistors in a 300-watt envelope — but the logarithmic compute is deliberately small, and the memory is large.</p>
+  <p>The die carries 48 logarithmic cores, each a 128&times;128 systolic array of those cheap log-adders, alongside 16 RISC-V cores that handle routing and the decode loop. Because the math units are so compact, there's room for <span class="hl-gold">144&nbsp;GB of HBM3E and 256&nbsp;MB of on-chip SRAM</span> — about five times the SRAM of an Nvidia Blackwell. The whole philosophy is visible right there in the floorplan: less silicon for arithmetic, more for keeping data close.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="A Napier die floorplan: 48 small logarithmic cores (128x128 systolic arrays) and 16 RISC-V cores taking little area, with a dominant memory region of 144GB HBM3E and 256MB SRAM; before/after bars show multiplier area shrinking and memory growing.">
+    <figcaption><span class="fig-label">Fig 5</span> The bet, made physical: tiny log-math cores free up the die, and the reclaimed silicon goes to memory — ~5&times; the on-chip SRAM of a Blackwell.</figcaption>
+  </figure>
+  <p>This isn't Tensordyne's first attempt. As Recogni, the company already shipped this same arithmetic in a 7nm chip for self-driving cars, where every watt matters. Napier points the identical idea at the datacenter — and reframes it as a memory-rich inference machine rather than a flops monster. Which, as we're about to see, is exactly how to read its headline number.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>Now read the 13&times; honestly</h2>
+  <p class="drop">Tensordyne's banner claim is <span class="hl">13&times; the tokens per second and 17&times; the tokens per watt</span> of an Nvidia GB300 rack. Eye-watering — and worth taking apart, because most of the story is in how you count.</p>
+  <p>Start with the racks. A Tensordyne TDN72 packs <strong>288 Napier chips at 300W each</strong>; an Nvidia GB300 rack holds <strong>72 GPUs at about 1,200W each</strong>. Multiply it out and both racks burn the same roughly <span class="hl">86 kilowatts</span> of accelerators. So Tensordyne is fitting <em>four times as many</em> chips into the same power envelope. That alone accounts for about 4&times; of the 13&times; — it's packing, not magic. The genuine <span class="hl-gold">per-chip advantage is closer to 3.3&times;</span>.</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">~100&times;</span><span class="lbl">lower error vs raw Mitchell</span></div>
+    <div class="stat"><span class="num">5&times;</span><span class="lbl">on-chip SRAM vs Blackwell</span></div>
+    <div class="stat"><span class="num">~3.3&times;</span><span class="lbl">the real per-chip win</span></div>
+  </div>
+  <p>And where does even that 3.3&times; come from? Not from raw compute — the rack actually has <em>fewer</em> FP4 flops than a GB300. It comes from the extra memory, plus a <span class="hl">latency-bound operating point</span>: the regime where you're serving a few users at very low latency, GPUs sit half-idle waiting on memory, and a memory-heavy chip pulls ahead. Tensordyne quotes 1,300 tokens per second <em>per user</em> on a two-trillion-parameter mixture-of-experts model — a latency figure, not a throughput crown.</p>
+  <figure>
+    <img src="figures/fig6.png" alt="The 13x claim decomposed: ~4x from packing 4x more chips at the same 86kW, ~3.3x real per-chip; caveats listed — fewer FP4 flops so the win is memory, a latency-bound operating point, all simulation, ships 2027 vs Rubin.">
+    <figcaption><span class="fig-label">Fig 6</span> The honest decomposition: ~4&times; of the 13&times; is just 4&times; more chips at equal power; the real per-chip edge (~3.3&times;) comes from memory and a latency-bound regime, not flops.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">The number</div>
+      <div class="cell">The headline</div>
+      <div class="cell">The honest read</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>13&times; tokens/s</strong></div>
+      <div class="cell">13&times; a GB300 rack</div>
+      <div class="cell">~4&times; is just 4&times; more chips at equal power; ~3.3&times; is the real per-chip win</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Where it comes from</strong></div>
+      <div class="cell">"log math is faster"</div>
+      <div class="cell">Extra memory + a latency-bound regime — it has fewer FP4 flops, not more</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Status</strong></div>
+      <div class="cell">"beats Blackwell"</div>
+      <div class="cell">All simulation; chip just taped out; systems ship 2027 vs Nvidia's Rubin</div>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>So — is it real?</h2>
+  <p class="drop">Two things can be true at once. The core idea is real and genuinely elegant: log-domain multiplication is decades old, the addition problem is the reason it never stuck, and cheap shift-and-round corrections that dodge the lookup table — accurately enough to skip retraining — are a legitimately clever way through. That part deserves the attention it's getting.</p>
+  <p>The rest calls for patience. Every number so far is <span class="hl">simulation</span>; Napier has only just taped out, and silicon has a long history of humbling simulations. Systems aren't due until <span class="hl-gold">2027</span>, by which point the chip to beat won't be today's Blackwell but Nvidia's next architecture, Rubin. The advantage, read honestly, is narrower than 13&times; — more memory and clever packing aimed at a specific low-latency serving regime, not a wholesale compute miracle.</p>
+  <p>But the underlying lesson outlasts any single chip. For a decade, AI hardware progress meant chasing more and faster multipliers. Tensordyne is betting on the opposite move — <span class="hl">make the multiplier almost disappear</span> and pour the reclaimed silicon into memory. Whether or not Napier wins, that's the more interesting question for the next generation of chips: not how fast can you multiply, but whether you need to multiply at all.</p>
+  <div class="marginalia">One concept, explained simply. If "multiply by adding" now sounds less like a gimmick and more like a real, hard-won engineering trade, the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">The cheapest multiply is the one you turn into an add.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 18, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
