@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Small Model, Big Logic — How VibeThinker-3B Reasons — A Visual Walkthrough</title>
+<meta name="description" content="VibeThinker-3B, a 3-billion-parameter model, matches flagship reasoning systems 100x its size on math and code. A visual walkthrough of the Spectrum-to-Signal training, the Compression-Coverage hypothesis, and why reasoning fits in a small model." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="Small Model, Big Logic: how VibeThinker-3B reasons" />
+<meta property="og:description" content="A 3B model that matches Gemini 3 Pro and DeepSeek V3.2 on math and code. The Spectrum-to-Signal training, the Compression-Coverage hypothesis, and why reasoning fits in a small model." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/small-models-can-reason/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/small-models-can-reason/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Small Model, Big Logic: how VibeThinker-3B reasons" />
+<meta name="twitter:description" content="A 3B model that matches Gemini 3 Pro and DeepSeek V3.2 on math and code. The Spectrum-to-Signal training, the Compression-Coverage hypothesis, and why reasoning fits in a small model." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/small-models-can-reason/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 9 — Small models &amp; reasoning</span>
+    <span class="small-caps">Jun 19, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">A 3-billion-parameter model that reasons like a giant</p>
+  <h1 class="anim" style="animation-delay:.15s">Small model,<br>big <em>logic</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">We were told deep reasoning needs scale — hundreds of billions of parameters. VibeThinker-3B, a model small enough to run on a laptop, scores 94.3 on competition math and matches Gemini 3 Pro and DeepSeek V3.2 on the hardest verifiable tasks. The trick isn't size. It's how you train, and what you ask a small model to hold.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>From Weibo's AI lab, extending their 1.5B "Tiny Model, Big Logic." The recipe is a training philosophy they call <em>Spectrum-to-Signal</em> — explore a wide spectrum of solutions before sharpening to the correct one — and a hypothesis about which skills compress into few parameters and which don't. We'll explain both, look at the receipts, and be honest about what a tiny reasoner can and can't do.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">The three-billion-parameter surprise</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">Why reasoning fits in a small box</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">The Pass@1 trap</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">How you actually train it</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">The receipts</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">What a small reasoner isn't</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">Why this matters</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>The three-billion-parameter surprise</h2>
+  <p class="drop">For the last few years, the path to a smarter model has felt like a law of nature: add parameters. Reasoning — the ability to work through a hard math olympiad problem or a tricky coding challenge step by step — seemed to be the most scale-hungry skill of all, the last thing a small model could ever do well. VibeThinker-3B is a polite, well-evidenced argument that this was never quite true.</p>
+  <p>It has <span class="hl">three billion parameters</span>. That's small enough to run on a single consumer GPU, even a good laptop — and perhaps a hundred times smaller than the flagship systems it's being compared to. Yet on the tasks where you can actually <em>check</em> the answer, it lands in the same band as DeepSeek V3.2, GLM-5, and Gemini 3 Pro: <span class="hl">94.3 on AIME26</span> (a brutal competition-math benchmark), 80.2 on the LiveCodeBench coding suite, and a 96.1% acceptance rate on brand-new LeetCode contests it had never seen.</p>
+  <figure>
+    <img src="figures/fig1.png" alt="A reasoning-score track with three huge model circles (DeepSeek V3.2, GLM-5, Gemini 3 Pro) and one tiny VibeThinker-3B dot all reaching the same frontier band.">
+    <figcaption><span class="fig-label">Fig 1</span> A 3B dot standing on the same line as models a hundred times its size — on the hard, checkable reasoning tasks.</figcaption>
+  </figure>
+  <p>That last number matters most. A model can memorise old exam papers; it cannot memorise a contest that didn't exist when it was trained. Scoring 96% on <em>unseen</em> problems means VibeThinker is genuinely reasoning, not reciting. So the interesting question isn't "is it real?" — it's <span class="hl-gold">how does so much reasoning fit in so few parameters?</span></p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>Why reasoning fits in a small box</h2>
+  <p class="drop">The paper's central idea is a clean distinction that, once you hear it, is hard to unhear. Call it the <span class="hl">Compression-Coverage hypothesis</span>: not all of a model's abilities have the same shape. Some are <em>skills</em>; some are <em>breadth</em>. And the two demand very different amounts of memory.</p>
+  <p>Verifiable reasoning — math, code, formal logic, anything with a checkable answer — turns out to be a <span class="hl-violet">compressible skill</span>. It's a way of manipulating symbols and chaining steps, and that procedure can be squeezed into a surprisingly compact "reasoning core." You don't need to have memorised a billion facts to follow a proof; you need to have internalised how proofs <em>work</em>.</p>
+  <figure>
+    <img src="figures/fig2.png" alt="Two panels: verifiable reasoning compressing into a small dense gem (math, code, logic) versus open-domain knowledge spread across a vast field of facts and long-tail trivia that needs broad coverage.">
+    <figcaption><span class="fig-label">Fig 2</span> The hypothesis: reasoning is a compressible skill that fits a small core; open-domain knowledge is irreducible breadth that needs broad parameter coverage.</figcaption>
+  </figure>
+  <p>Open-domain knowledge is the opposite. There's no elegant compression of "who won the 1978 World Cup" or "the boiling point of acetone" — facts are <span class="hl">irreducible breadth</span>, and storing more of them genuinely needs more parameters. This is why a 3B model can be a <em>frontier reasoner</em> and still be a poor general-knowledge chatbot: it kept the compressible part and gave up the part that demands sheer size. The smallness isn't a compromise on reasoning — it's a deliberate bet about <em>which</em> capability to pack in.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>The Pass@1 trap</h2>
+  <p class="drop">Knowing reasoning is compressible doesn't tell you how to compress it. That's where VibeThinker's training philosophy comes in — and it starts by rejecting a habit that almost everyone else follows.</p>
+  <p>When you fine-tune a model, the obvious goal is to make its single best answer correct as often as possible — to maximise what's called <span class="hl">Pass@1</span>. Sensible as it sounds, the authors argue it's a trap. Optimising hard for one right answer quietly <em>crushes diversity</em>: the model collapses onto a single way of solving things and forgets the dozen other routes it might have taken. And a model with only one idea is a terrible starting point for the next training stage.</p>
+  <figure>
+    <img src="figures/fig3.png" alt="Two stages: Spectrum (SFT) fanning out many diverse solution paths from a problem, then Signal (RL) amplifying the correct paths into one bold beam while wrong paths fade.">
+    <figcaption><span class="fig-label">Fig 3</span> Spectrum-to-Signal: first fan out a wide spectrum of diverse solutions, then use reinforcement learning to amplify the correct signal within it.</figcaption>
+  </figure>
+  <p>Their fix is the <span class="hl-gold">Spectrum-to-Signal</span> principle. In the first stage, you do the opposite of the usual advice: you deliberately cultivate a broad <em>spectrum</em> of diverse solution paths, prizing variety over getting any single answer right. Only then, in the second stage, does reinforcement learning go to work — amplifying the correct <em>signal</em> hiding inside that rich, varied space. A wide net first; a sharp filter second. Diversity gives the filter something worth keeping.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>How you actually train it</h2>
+  <p class="drop">Spectrum-to-Signal is the philosophy; the pipeline that implements it has three concrete stages, and each one earns its place.</p>
+  <p>First, <span class="hl">curriculum-based supervised fine-tuning</span>: the model learns on an easy-to-hard ladder of problems, the way a student builds up, while the training is tuned to grow that diverse spectrum of solution styles rather than collapse it. Second, <span class="hl">multi-domain reinforcement learning</span>: across both math and code, the model is rewarded purely on whether its answers actually check out — and because those domains are <em>verifiable</em>, the reward signal is clean and honest, with no fuzzy human preference to game. Third, <span class="hl-green">offline self-distillation</span>: the model relearns from its own best solutions, sharpening and stabilising what it found.</p>
+  <figure>
+    <img src="figures/fig4.png" alt="A three-stage pipeline: curriculum SFT (easy to hard), multi-domain RL (math and code with verifiable rewards), and offline self-distillation (model relearns from its own best solutions).">
+    <figcaption><span class="fig-label">Fig 4</span> The pipeline: an easy-to-hard curriculum, reinforcement learning on checkable math and code, then self-distillation — all in service of Spectrum-to-Signal.</figcaption>
+  </figure>
+  <p>What's striking is how <em>cheap</em> this is. The 1.5B predecessor that pioneered the recipe was trained, end to end, for around <span class="hl">$7,800</span> — a rounding error next to the budgets of the giants it competes with. Frontier reasoning, it turns out, may be less about who can afford the most GPUs and more about who trains most cleverly.</p>
+  <div class="pull-quote">The goal of fine-tuning isn't to find the one right answer. It's to keep enough wrong-looking ones alive for reinforcement learning to discover which were right.</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>The receipts</h2>
+  <p class="drop">Numbers, then, because the claim is bold enough to deserve them. On <strong>AIME26</strong>, the hardest tier of competition mathematics, VibeThinker-3B scores <span class="hl">94.3</span> — and with claim-level test-time scaling, where it spends extra compute checking its reasoning claim by claim, that climbs to <span class="hl-green">97.1</span>. On <strong>LiveCodeBench v6</strong> it hits 80.2 Pass@1, and on fresh, unseen LeetCode contests it reaches a 96.1% acceptance rate.</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">94.3</span><span class="lbl">AIME26 (→ 97.1 w/ test-time scaling)</span></div>
+    <div class="stat"><span class="num">80.2</span><span class="lbl">LiveCodeBench v6 Pass@1</span></div>
+    <div class="stat"><span class="num">96.1%</span><span class="lbl">acceptance on unseen LeetCode</span></div>
+  </div>
+  <p>One more score guards against an easy failure mode. Models pushed hard toward reasoning often become rigid — brilliant at proofs, hopeless at simply following an instruction. So the authors checked <strong>IFEval</strong>, which measures strict instruction-following, and VibeThinker scored <span class="hl">93.4</span>. The reasoning glow-up didn't cost it its manners.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="A 2x2 of results: AIME26 94.3 rising to 97.1 with test-time scaling, LiveCodeBench v6 80.2 Pass@1, unseen LeetCode 96.1% acceptance, IFEval 93.4 instruction-following.">
+    <figcaption><span class="fig-label">Fig 5</span> Frontier-level on checkable math and code, real generalisation to unseen problems, and instruction-following left intact.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">Benchmark</div>
+      <div class="cell">Score</div>
+      <div class="cell">What it tells you</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>AIME26</strong></div>
+      <div class="cell">94.3 → 97.1</div>
+      <div class="cell">Frontier competition math; test-time scaling adds the last few points</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Unseen LeetCode</strong></div>
+      <div class="cell">96.1%</div>
+      <div class="cell">Generalises to problems written after training — reasoning, not memorising</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>IFEval</strong></div>
+      <div class="cell">93.4</div>
+      <div class="cell">Heavy reasoning training didn't break instruction-following</div>
+    </div>
+  </div>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>What a small reasoner isn't</h2>
+  <p class="drop">It would be easy to over-read all this as "small models have caught up, scale is over." That's not the claim, and the Compression-Coverage hypothesis tells you exactly why. VibeThinker is a <span class="hl">specialist</span>, not a universal model.</p>
+  <p>Point it at competition math, algorithmic coding, step-by-step logic — anything checkable — and it is genuinely frontier-class. Ask it who directed an obscure 1970s film, or for a fact from the long tail of human knowledge, and a 3B model simply hasn't the room to store that breadth. The honest framing, which the authors are careful to make, is that a tiny reasoner is a <span class="hl-gold">complementary path</span>, not a replacement: cheap to run, easy to deploy, and best paired with retrieval or tools when it needs facts it doesn't carry.</p>
+  <figure>
+    <img src="figures/fig6.png" alt="Two columns under a VibeThinker-3B chip: great at compressible skills (math, coding, logic, checkable tasks) versus not built for broad coverage (world knowledge, long-tail facts, general chat); a banner calls it a complementary path.">
+    <figcaption><span class="fig-label">Fig 6</span> A reasoning core, not a know-it-all: superb at compressible, checkable skills; reliant on tools for the broad knowledge that needs scale.</figcaption>
+  </figure>
+  <p>Seen that way, the result is less "David beats Goliath" and more "David and Goliath do different jobs." A giant model carries the world's knowledge; a small reasoner carries a sharp, portable engine for thinking. The interesting future isn't one beating the other — it's the two working together.</p>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Why this matters</h2>
+  <p class="drop">Strip away the leaderboard drama and VibeThinker-3B leaves two ideas worth keeping. The first is practical: a frontier-level <span class="hl">reasoning engine that runs on a laptop</span>, trained for the price of a used car, is a genuinely democratising thing. It puts serious mathematical and coding ability in reach of anyone — no datacenter, no API bill, no permission required.</p>
+  <p>The second is conceptual, and it may outlast the model. For years we measured intelligence in parameters, as if capability were a single dial you turn up with scale. The Compression-Coverage hypothesis suggests it's at least <em>two</em> dials — a compressible <span class="hl-violet">reasoning</span> dial and a coverage-hungry <span class="hl-violet">knowledge</span> dial — and that they should perhaps be built, and bought, separately.</p>
+  <p>Whether or not VibeThinker is the model people remember, that reframing is the part to carry forward. The next question for small models isn't "how close to GPT can you get?" It's <span class="hl-gold">"which capability are you trying to hold, and does it actually need to be big?"</span></p>
+  <div class="marginalia">One concept, explained simply. If "small models can't reason" now sounds less like a law and more like a training problem someone solved, the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">Reasoning is a skill you can compress. Knowledge is a breadth you cannot.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 19, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
