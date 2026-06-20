@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>A Million Tokens, Made Cheap — Inside GLM-5.2 — A Visual Walkthrough</title>
+<meta name="description" content="GLM-5.2 holds an entire codebase in a 1-million-token context. A visual walkthrough of the three nested tricks that make it affordable — Mixture-of-Experts, DeepSeek Sparse Attention, and IndexShare (2.9x fewer FLOPs) — plus MTP speculative decoding, and an honest read on the missing benchmarks." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="GLM-5.2: a million-token context, made cheap" />
+<meta property="og:description" content="How GLM-5.2 fits a whole codebase in 1M tokens: Mixture-of-Experts, DeepSeek Sparse Attention, and the new IndexShare trick (2.9x fewer FLOPs) — plus an honest read on the missing benchmarks." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/glm-5-2-million-tokens/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/glm-5-2-million-tokens/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="GLM-5.2: a million-token context, made cheap" />
+<meta name="twitter:description" content="How GLM-5.2 fits a whole codebase in 1M tokens: Mixture-of-Experts, DeepSeek Sparse Attention, and the new IndexShare trick (2.9x fewer FLOPs) — plus an honest read on the missing benchmarks." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/glm-5-2-million-tokens/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 10 — Open models &amp; long context</span>
+    <span class="small-caps">Jun 20, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">Inside GLM-5.2's million-token engine</p>
+  <h1 class="anim" style="animation-delay:.15s">A million tokens,<br>made <em>cheap</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">Z.ai's GLM-5.2 is built to hold your entire codebase in its head — a usable one-million-token context, open under MIT. The headline is the size. The interesting part is the bill: how do you make a model attend to a million tokens without it costing a fortune? The answer is three nested tricks.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>Released June 2026 by Z.ai (Zhipu), GLM-5.2 is a 744-billion-parameter Mixture-of-Experts model positioned for long-horizon, agentic coding. Under the hood it stacks three efficiency moves — sparse experts, sparse attention, and a new trick called <em>IndexShare</em> — plus faster decoding. We'll unpack each, then be honest about the one thing missing: published benchmarks.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">A model built to read your whole repo</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">744 billion parameters, 40 billion fire</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">Don't attend to a million tokens</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">IndexShare: the headline trick</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">Writing several tokens at once</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">What's proven, what's promised</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">Why this matters</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>A model built to read your whole repo</h2>
+  <p class="drop">Most chat models meet your code one file at a time. GLM-5.2, released in June 2026 by the Chinese lab Z.ai, is built for the opposite: to take in an <span class="hl">entire repository</span> — every file, the tests, the history — and reason across all of it at once. Its context window holds a <em>million</em> tokens, with room to write back up to 131,072 more.</p>
+  <p>That single capability reshapes what the model is <em>for</em>. It isn't pitched as a clever chatbot; it's pitched as an engine for <span class="hl-gold">long-horizon, agentic coding</span> — the kind of multi-step refactor or feature build that a human engineer carries in their head over an afternoon. Z.ai frames the whole GLM-5 line as a move "from vibe coding to agentic engineering," and it ships under a permissive MIT licence, weights and all.</p>
+  <figure>
+    <img src="figures/fig1.png" alt="A code repository streaming as tokens into the GLM-5.2 model, with a 1-million-token context ruler and a spec card listing 744B total / 40B active / 384 experts / MIT open weights.">
+    <figcaption><span class="fig-label">Fig 1</span> GLM-5.2 in one picture: a 744B-parameter open model built to hold a whole codebase in a million-token context.</figcaption>
+  </figure>
+  <p>But a million-token context is easy to <em>claim</em> and brutally hard to <em>afford</em>. Naively, paying attention to a million tokens is staggeringly expensive — the cost of attention grows with the square of the length. So the real engineering story of GLM-5.2 isn't the number on the box. It's the stack of tricks that makes that number <span class="hl">usable</span>. There are three, nested inside each other.</p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>744 billion parameters, 40 billion fire</h2>
+  <p class="drop">The first trick is the one most modern frontier models share: <span class="hl">Mixture-of-Experts</span>. On paper, GLM-5.2 is enormous — 744 billion parameters, spread across 384 specialist sub-networks called <em>experts</em>. If all of them ran on every token, it would be ruinously slow. They don't.</p>
+  <p>Instead, a small <em>router</em> looks at each incoming token and picks just a handful of experts to handle it. The rest sit idle. So while the model <em>knows</em> 744 billion parameters' worth of things, only about <span class="hl-gold">40 billion</span> actually compute for any given token — roughly one part in eighteen. You get the breadth of a giant model at the running cost of a much smaller one.</p>
+  <figure>
+    <img src="figures/fig2.png" alt="A token entering a router that lights up a few of 384 experts in vermillion while the rest stay grey, with tallies of 744B total versus ~40B active parameters.">
+    <figcaption><span class="fig-label">Fig 2</span> Mixture-of-Experts: a router activates only a few of 384 experts per token, so just ~40B of 744B parameters fire.</figcaption>
+  </figure>
+  <p>This is the foundation, but on its own it doesn't solve the long-context problem. MoE makes each token cheaper to <em>process</em>; it does nothing about the fact that, at a million tokens, every token wants to look at every other one. For that, you need to be sparse in a second dimension — not in which experts run, but in <span class="hl">which tokens you bother to look at</span>.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>Don't attend to a million tokens</h2>
+  <p class="drop">Here's the heart of the cost problem. In ordinary attention, producing each new token means comparing it against <em>every</em> previous token. At a million tokens that's a million comparisons per step, and the total work scales with the square of the length — the wall that makes long context so expensive.</p>
+  <p>GLM-5.2 adopts a fix pioneered by DeepSeek, called <span class="hl">Sparse Attention</span>. The insight is almost obvious once said: of a million past tokens, only a few dozen are actually relevant to the next word. So why look at all of them? A tiny, fast neural network — DeepSeek's <em>Lightning Indexer</em> — quickly scores the past and retrieves only the <span class="hl-gold">top-K most relevant blocks</span>. Real attention then runs over just those few. Retrieve first, then attend.</p>
+  <div class="formula">full attention: <em>cost ∝ length²</em> &nbsp;→&nbsp; sparse attention: <em>cost ∝ length</em></div>
+  <figure>
+    <img src="figures/fig3.png" alt="Top: full attention over 1M tokens crossed out as quadratic and impossible. Bottom: a Lightning Indexer selecting a few top-K token blocks, then attention running only over those.">
+    <figcaption><span class="fig-label">Fig 3</span> Sparse attention: a lightning-fast indexer retrieves only the handful of relevant tokens, turning quadratic cost into linear.</figcaption>
+  </figure>
+  <p>That alone turns the impossible into the merely expensive — quadratic cost becomes roughly linear. But notice the new character we've introduced: the indexer itself. It's lightweight, yes, but it isn't free, and a deep model runs attention dozens of times over. Paying for that indexer at every single layer is where GLM-5.2 found its own contribution.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>IndexShare: the headline trick</h2>
+  <p class="drop">This is GLM-5.2's genuinely new idea, and it's the kind of optimisation that feels obvious only in hindsight. The Lightning Indexer's job is to decide <em>which</em> past tokens matter. GLM-5.2's bet is that this decision doesn't change much from one layer to the next — so why recompute it every layer?</p>
+  <p>Under <span class="hl">IndexShare</span>, the model groups its layers into blocks of four. Only the <em>first</em> layer in each block runs the indexer; the top-K tokens it selects are then <span class="hl-gold">reused by the next three layers</span> as-is. The expensive part of the indexer — scoring every token and sorting for the top-K — happens once instead of four times. Three out of every four layers skip it entirely.</p>
+  <figure>
+    <img src="figures/fig4.png" alt="A stack of transformer layers grouped in fours; the first layer of each group runs an indexer whose top-K picks are reused by the next three, with a before/after bar showing 2.9x fewer FLOPs.">
+    <figcaption><span class="fig-label">Fig 4</span> IndexShare: one indexer per four layers, its picks reused downstream — cutting per-token FLOPs by 2.9&times; at a million-token context.</figcaption>
+  </figure>
+  <p>The payoff is concrete: at a one-million-token context, IndexShare cuts per-token compute by <span class="hl">2.9&times;</span>. And because the model was trained with the trick switched on from the middle of training onward, it isn't a lossy shortcut bolted on at the end — GLM-5.2 reportedly beats its predecessor, GLM-5.1, on long-context tasks while doing <em>less</em> work. Cheaper and better, from the same idea.</p>
+  <div class="pull-quote">The indexer decides which tokens matter. IndexShare's bet: that decision barely changes layer to layer — so make it once, not four times.</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Writing several tokens at once</h2>
+  <p class="drop">The three tricks so far make <em>reading</em> a million tokens cheap. The last one makes <em>writing</em> the answer faster. Normally a model generates one token at a time, each step waiting on the last — a strict, slow single file.</p>
+  <p>GLM-5.2 leans on <span class="hl">Multi-Token Prediction</span> for speculative decoding (a cousin of the draft-then-verify idea we've covered before). A small MTP module <em>drafts</em> several upcoming tokens in one go; the main model then verifies that whole run in a single pass, committing the tokens it agrees with and stopping at the first it doesn't. Guess ahead, check in bulk, keep what's right.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="A decoding strip: an MTP module drafts several tokens at once, a verify pass accepts a run of them in vermillion and rejects a later one in grey, with a bracket marking the accepted run up to 20% longer.">
+    <figcaption><span class="fig-label">Fig 5</span> MTP speculative decoding: draft several tokens, verify in one pass, commit the accepted run — now up to 20% longer per step.</figcaption>
+  </figure>
+  <p>The improvement in GLM-5.2 is that its refined MTP layer gets more of its guesses accepted — the accepted run is up to <span class="hl-gold">20% longer</span>. More tokens committed per verification step means fewer steps overall, and noticeably faster output. Four tricks, then: sparse experts, sparse attention, a shared indexer, and bulk decoding — each attacking a different slice of the cost.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>What's proven, what's promised</h2>
+  <p class="drop">Here's where the honesty matters, because it's easy to read all this cleverness as a finished verdict. The <em>architecture</em> of GLM-5.2 is real, documented, and open — you can download the weights today. What's conspicuously absent is the part everyone usually leads with: <span class="hl">the scores</span>.</p>
+  <p>At launch, Z.ai published <span class="hl">no official standardized benchmarks</span> — no SWE-bench Verified, no LiveCodeBench, no head-to-head leaderboard numbers. For a model positioned squarely at coding, that's a notable gap. Independent third-party evaluations are still trickling in. So the right posture is calibrated: judge GLM-5.2 on its open architecture and your own trials, not on a ranking that doesn't yet exist.</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">744B</span><span class="lbl">total params · ~40B active</span></div>
+    <div class="stat"><span class="num">2.9&times;</span><span class="lbl">fewer FLOPs from IndexShare at 1M</span></div>
+    <div class="stat"><span class="num">0</span><span class="lbl">official benchmarks at launch</span></div>
+  </div>
+  <figure>
+    <img src="figures/fig6.png" alt="Two columns: confirmed (MoE specs, 1M context, DSA+IndexShare, MTP, MIT weights, High/Max modes) versus not yet (no official benchmarks, third-party scores pending, real-world quality unproven).">
+    <figcaption><span class="fig-label">Fig 6</span> An honest ledger: the engineering is real and open; the standardized scores simply aren't in yet.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">Aspect</div>
+      <div class="cell">Status</div>
+      <div class="cell">What it means for you</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Architecture</strong></div>
+      <div class="cell">Confirmed &amp; open (MIT)</div>
+      <div class="cell">MoE + sparse attention + IndexShare are documented; weights downloadable</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Efficiency</strong></div>
+      <div class="cell">Reported by Z.ai</div>
+      <div class="cell">2.9&times; fewer FLOPs at 1M; +20% MTP acceptance — plausible, not yet independently audited</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Quality</strong></div>
+      <div class="cell">Unmeasured</div>
+      <div class="cell">No official benchmarks at launch — try it on your own repo before trusting it</div>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Why this matters</h2>
+  <p class="drop">Step back from GLM-5.2 the product and the pattern is the real story. A "one-million-token context" sounds like a marketing number, but underneath it is a careful chain of <span class="hl">sparsity</span>: don't run every expert, don't attend to every token, don't even re-run the indexer every layer. Each trick attacks a different place the cost hides, and stacked together they turn an impossible context length into a shippable one.</p>
+  <p>That it arrives as <span class="hl-gold">open MIT weights</span> is the part with teeth. The efficiency ideas here — sparse attention, a shared indexer, multi-token decoding — are now in the open for anyone to read, run, and build on. Whether or not GLM-5.2 tops a leaderboard when the scores finally land, those ideas don't go back in the box.</p>
+  <p>So treat today's piece as a map of the machinery, not a verdict on the model. The honest summary is the most useful one: <span class="hl">the engineering is real and inspectable; the scoreboard is still blank.</span> The best thing you can do with an open model whose benchmarks haven't shipped is the oldest thing in engineering — point it at your own problem and see.</p>
+  <div class="marginalia">One concept, explained simply. If "a million-token context" now reads to you as a stack of sparsity tricks rather than a single magic number, the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">A million-token context isn't one big idea — it's four small refusals to waste compute.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 20, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
