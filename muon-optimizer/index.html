@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>A Fairer Gradient Step — The Muon Optimizer — A Visual Walkthrough</title>
+<meta name="description" content="Muon trains big models ~2x more compute-efficiently than AdamW by orthogonalizing the gradient — giving every direction a fair step. A visual walkthrough of the lopsided gradient, the Newton-Schulz orthogonalization, why Adam misses it, and how Muon scaled to Kimi K2." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="Muon: the optimizer that orthogonalizes the gradient" />
+<meta property="og:description" content="Why flattening a gradient's singular values gives every direction a fair step — training big models ~2x faster, now scaled to trillion-parameter LLMs like Kimi K2." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/muon-optimizer/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/muon-optimizer/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Muon: the optimizer that orthogonalizes the gradient" />
+<meta name="twitter:description" content="Why flattening a gradient's singular values gives every direction a fair step — training big models ~2x faster, now scaled to trillion-parameter LLMs like Kimi K2." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/muon-optimizer/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 12 — How models are trained</span>
+    <span class="small-caps">Jun 22, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">Muon: the optimizer reshaping how big models train</p>
+  <h1 class="anim" style="animation-delay:.15s">A fairer<br>gradient <em>step</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">For a decade, almost every large model has been trained by the same optimizer: AdamW. Muon is the first serious challenger to stick — and its idea is geometric, not statistical. It looks at the shape of each update and notices it's lopsided, then straightens it out. The result: roughly the same model for half the compute.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>Created by Keller Jordan in late 2024, Muon orthogonalizes the gradient — flattening its singular values so every direction gets a fair step — using a cheap Newton–Schulz iteration. Moonshot AI then showed it <em>scales</em>: their "Muon is Scalable" study reported ~2&times; the compute efficiency of AdamW, and the recipe now trains trillion-parameter models like Kimi K2.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">The shape of a learning step</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">Muon's move: make the step fair</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">Doing it cheaply: Newton–Schulz</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">Why Adam misses it</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">Where Muon goes, where Adam stays</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">The payoff: about 2&times;, and it scales</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">Why this matters</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>The shape of a learning step</h2>
+  <p class="drop">Training a neural network is, at heart, a long sequence of small steps. At each one, the model computes a gradient — a direction to nudge its weights — and an <em>optimizer</em> decides exactly how to take that step. It's the least glamorous part of deep learning and one of the most consequential: a better optimizer means the same model for less money, or a better model for the same.</p>
+  <p>Here's the problem Muon noticed. For a weight <em>matrix</em>, the update isn't a single arrow — it's a whole matrix of numbers, and that matrix is badly <span class="hl">lopsided</span>. If you decompose it into its fundamental directions, a handful of them carry almost all the magnitude, while the rest are nearly zero. The update is "almost low-rank," in the authors' words: it lurches hard along a few directions and barely moves the model along all the others.</p>
+  <figure>
+    <img src="figures/fig1.png" alt="A singular-value bar chart with a few tall dominant bars and a long tail of tiny ones, beside a stretched update ellipse versus a balanced circle.">
+    <figcaption><span class="fig-label">Fig 1</span> The lopsided step: a gradient matrix is nearly low-rank — a few directions dominate the update while many useful ones are starved.</figcaption>
+  </figure>
+  <p>This is wasteful. The model has thousands of directions it could be learning in, and most of them are getting starved every single step. AdamW, the reigning optimizer, doesn't fix this — it rescales each weight on its own, but it never looks at the matrix as a whole, so the directional imbalance survives. Muon's whole contribution is to <span class="hl-gold">straighten that step out.</span></p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>Muon's move: make the step fair</h2>
+  <p class="drop">Muon's fix is a single, clean operation with a slightly intimidating name: it <span class="hl">orthogonalizes</span> the update. Strip away the jargon and it means something simple — make every direction count equally.</p>
+  <p>Every matrix can be broken into three pieces by the singular value decomposition: <code>G = U S V<sup>T</sup></code>. Here <code>U</code> and <code>V</code> hold the directions, and <code>S</code> is a list of how strongly each direction fires — those lopsided magnitudes from the last section. Muon does the boldest possible thing to <code>S</code>: it <span class="hl-gold">sets every value in it to 1</span>. The dominant directions are reined back in; the starved ones are amplified to equal standing. What's left, <code>U V<sup>T</sup></code>, is the orthogonalized update — a step of equal magnitude in every direction at once.</p>
+  <div class="formula">G = U <em>S</em> V<sup>T</sup> &nbsp;→&nbsp; set all of <em>S</em> to 1 &nbsp;→&nbsp; update = <em>U V<sup>T</sup></em></div>
+  <figure>
+    <img src="figures/fig2.png" alt="The SVD G = U S V^T with the diagonal S of unequal values becoming an identity matrix, and below a stretched ellipse becoming a clean circle labeled equal-magnitude step.">
+    <figcaption><span class="fig-label">Fig 2</span> Muon's move: take the SVD and set every singular value to 1 — turning a stretched, lopsided step into a balanced one. (Muon = MomentUm Orthogonalized by Newton–Schulz.)</figcaption>
+  </figure>
+  <p>Geometrically, it turns a step shaped like a thin, stretched ellipse into a clean circle — the same push in all directions. Conceptually, it forces the model to learn in <em>every</em> direction the data offers, not just the loudest few. The only catch is that an SVD is far too slow to run on every weight matrix, every step. So Muon never actually computes one.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>Doing it cheaply: Newton–Schulz</h2>
+  <p class="drop">A true SVD costs roughly the cube of the matrix size — fine once, ruinous when you do it for every layer on every one of a million training steps. Muon's practical trick, and the reason it's usable at all, is to <span class="hl">approximate</span> the orthogonalization with something cheap.</p>
+  <p>That something is the <span class="hl-gold">Newton–Schulz iteration</span>: a short, fixed polynomial you apply to the matrix a handful of times. Each pass nudges the singular values toward 1 without ever naming them — it's just a few matrix multiplications. After about five iterations they're close enough, and crucially the whole thing runs in low-precision <code>bf16</code>, the format GPUs are fastest at.</p>
+  <div class="formula">G := 3.4445 G − 4.7750 (GG<sup>T</sup>)G + 2.0315 (GG<sup>T</sup>)<sup>2</sup>G &nbsp;&nbsp;<span style="color:var(--ink-faint)">(repeat ~5&times;)</span></div>
+  <figure>
+    <img src="figures/fig3.png" alt="On the left a crossed-out expensive SVD; on the right a convergence graph showing a few Newton-Schulz iterations driving a singular value up toward 1, with the quintic update rule.">
+    <figcaption><span class="fig-label">Fig 3</span> Newton–Schulz: a fixed quintic polynomial, run ~5 times in bf16, drives every singular value toward 1 — orthogonalization without an SVD, at under 1% extra compute.</figcaption>
+  </figure>
+  <p>The cost of all this? In a typical language-model run, <span class="hl">under one percent</span> of total compute. For one famous setup the overhead worked out to 0.7%. You get the geometric benefit of a heavyweight second-order method for almost nothing — which is exactly why Muon is more than a curiosity.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Why Adam misses it</h2>
+  <p class="drop">To see what's genuinely new here, it helps to contrast Muon with the optimizer it's challenging. AdamW's strategy is <span class="hl">per-coordinate</span>: it keeps a running estimate of how big each individual weight's gradients have been, and scales each one independently. Every number in the matrix is tuned on its own, in isolation.</p>
+  <p>That's powerful, but it's <em>blind to structure</em>. Adam treats a weight matrix as a flat bag of unrelated numbers; it has no notion that those numbers form directions, or that a few of those directions are hogging the update. Muon takes the opposite view: it treats the weight matrix as a single geometric object and fixes the <span class="hl-gold">relationship between its directions</span> — equalizing the singular values that Adam never even looks at.</p>
+  <figure>
+    <img src="figures/fig4.png" alt="Two panels: AdamW rescaling each weight cell independently (per-coordinate, blind to structure) versus Muon reshaping the whole matrix's singular-value geometry as one object.">
+    <figcaption><span class="fig-label">Fig 4</span> Adam tunes each weight alone and never sees the matrix; Muon balances the matrix as a whole — a cheap cousin of second-order methods like Shampoo.</figcaption>
+  </figure>
+  <p>In fact, Muon turns out to be a fast, stripped-down relative of a classical heavyweight optimizer called Shampoo, which "whitens" gradients with expensive matrix roots. Muon gets most of the same effect — balancing the matrix's geometry — by applying momentum first and then the cheap Newton–Schulz pass. It's the rare case of a second-order idea made cheap enough to actually use.</p>
+  <div class="pull-quote">Adam asks how big each weight should step. Muon asks what shape the whole step should be.</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Where Muon goes, where Adam stays</h2>
+  <p class="drop">One practical surprise: Muon is not a wholesale replacement. It only makes sense for the parts of the network that <em>are</em> 2D weight matrices — and a transformer has plenty that aren't.</p>
+  <p>So real training runs are <span class="hl">hybrids</span>. Muon takes the big matrices in the middle of the network — the attention projections and the feed-forward layers, where the bulk of the parameters live. But the <span class="hl-gold">embedding layer</span> at the input, the <span class="hl-gold">output head</span> at the top, and all the little one-dimensional parameters — biases, normalization gains — keep using AdamW, because orthogonalization simply doesn't apply to them. The authors found this split matters for getting the best results.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="A transformer layer stack color-coded by optimizer: embeddings and output head in blue (AdamW), the hidden attention and MLP weight matrices in red (Muon), with 1D parameters noted as AdamW.">
+    <figcaption><span class="fig-label">Fig 5</span> A hybrid: Muon runs on the big 2D hidden weight matrices; embeddings, the output head, and all 1D parameters stay on AdamW.</figcaption>
+  </figure>
+  <p>It's a small detail with a useful lesson: Muon isn't trying to win an argument with Adam so much as do the one job Adam does poorly. Each handles the part of the network it's suited for. With that division settled, the only question left is whether it actually pays off — and here the evidence is unusually strong.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>The payoff: about 2&times;, and it scales</h2>
+  <p class="drop">Optimizers are littered with ideas that look good on a small benchmark and evaporate at scale. What makes Muon notable is that it has cleared both bars.</p>
+  <p>At small scale, the evidence is almost comically direct. Muon holds <span class="hl">all twelve</span> of the NanoGPT speed records, set by seven different researchers — and the kicker is that anyone could take the record back simply by showing AdamW is faster. Nobody has. On a 1.5B model, Muon reached GPT-2 XL quality in <span class="hl">10 GPU-hours</span> versus AdamW's 13.3.</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">~2&times;</span><span class="lbl">compute efficiency vs AdamW at scale</span></div>
+    <div class="stat"><span class="num">&lt;1%</span><span class="lbl">extra compute for orthogonalization</span></div>
+    <div class="stat"><span class="num">1T</span><span class="lbl">params: Kimi K2, Muon-trained</span></div>
+  </div>
+  <p>The scale question was settled by Moonshot AI. Their "Muon is Scalable" study found that with just two adjustments — <span class="hl-gold">adding weight decay</span> and carefully tuning the per-parameter update size — Muon delivered roughly <span class="hl">2&times; the compute efficiency of AdamW</span> on compute-optimal training, and trained their Moonlight mixture-of-experts model out of the box. That same stack now trains <span class="hl">Kimi K2</span>, a trillion-parameter model. An idea from a hobbyist speedrunning benchmark is now training some of the largest open models in the world.</p>
+  <figure>
+    <img src="figures/fig6.png" alt="Results panels: Muon needing about half the compute of AdamW for the same loss; GPT-2 XL in 10 vs 13.3 GPU-hours; and a scale ladder from NanoGPT to Moonlight to Kimi K2 with the two scaling fixes.">
+    <figcaption><span class="fig-label">Fig 6</span> The payoff: ~2&times; the compute efficiency of AdamW — and with two small fixes (weight decay, update-size tuning) it scales to trillion-parameter models.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">Optimizer</div>
+      <div class="cell">What it does to the update</div>
+      <div class="cell">The catch</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>AdamW</strong></div>
+      <div class="cell">Rescales each weight by its own gradient history</div>
+      <div class="cell">Blind to matrix structure; battle-tested, simple</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Shampoo</strong></div>
+      <div class="cell">Whitens the matrix with exact matrix roots</div>
+      <div class="cell">The geometry Muon wants — but expensive</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Muon</strong></div>
+      <div class="cell">Orthogonalizes the matrix cheaply (Newton–Schulz)</div>
+      <div class="cell">Only for 2D matrices; needs the scaling fixes</div>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Why this matters</h2>
+  <p class="drop">It's easy to underrate optimizer research — it sounds like plumbing. But the optimizer is a multiplier on <em>everything</em>: every dollar of compute, every training run, every model a lab can afford to attempt. A genuine <span class="hl">2&times;</span> there is not a tweak; it's the difference between training one frontier model and two.</p>
+  <p>Muon's deeper lesson is about where the gains were hiding. For ten years the field treated AdamW as settled and looked for progress in architectures and data. Muon found a large, free improvement by asking a question nobody was asking — not "how big should each step be?" but <span class="hl-gold">"what shape should the step be?"</span> The answer, it turns out, is: fair in every direction.</p>
+  <p>And there's something fitting in its origin. Muon wasn't born in a big lab's research program — it came out of <span class="hl">NanoGPT speedrunning</span>, a friendly competition to train a small model as fast as possible. That a hobbyist sport produced the optimizer now training trillion-parameter models is a reminder that in this field, the next big idea can still come from anywhere — and that the boring-sounding parts are often where it's been waiting all along.</p>
+  <div class="marginalia">One concept, explained simply. If "orthogonalize the gradient" now reads to you as "give every direction a fair step," the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">Adam asks how big each step should be. Muon asks what shape it should have.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 22, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
