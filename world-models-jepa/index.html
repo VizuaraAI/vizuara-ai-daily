@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Planning by Imagining — World Models &amp; JEPA — A Visual Walkthrough</title>
+<meta name="description" content="World models let a machine plan by imagining future states in latent space instead of reacting token-by-token. A visual walkthrough of JEPA — predict the gist, not the pixels — and how V-JEPA 2 controls real robots zero-shot." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="World Models &amp; JEPA: how machines plan by imagining" />
+<meta property="og:description" content="Predict the future in latent space, not pixels — LeCun's bet on the path past today's LLMs. How JEPA works and how V-JEPA 2 controls real robots zero-shot." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/world-models-jepa/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/world-models-jepa/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="World Models &amp; JEPA: how machines plan by imagining" />
+<meta name="twitter:description" content="Predict the future in latent space, not pixels — LeCun's bet on the path past today's LLMs. How JEPA works and how V-JEPA 2 controls real robots zero-shot." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/world-models-jepa/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 13 — World models</span>
+    <span class="small-caps">Jun 23, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">JEPA, V-JEPA 2, and learning to look before you leap</p>
+  <h1 class="anim" style="animation-delay:.15s">Planning by<br><em>imagining</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">A language model answers by reacting — one token after another, with no picture of where it's heading. A <em>world model</em> does what you do before a tricky move: it imagines a few possible futures, judges them, and acts on the best one. This is Yann LeCun's long bet for getting past today's LLMs — and with V-JEPA 2, it just started driving real robots.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>The key idea, called <em>JEPA</em>, is to predict the future not as raw pixels but as abstract meaning — in latent space. That makes the prediction cheap, robust, and good enough to <em>plan</em> with. Meta's V-JEPA 2 (June 2025) learned from over a million hours of internet video, then controlled robot arms it had never seen, zero-shot. We'll build the idea from scratch.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">React, or plan?</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">The trouble with predicting everything</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">Predict the gist, not the pixels</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">Planning by imagining</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">Proof: V-JEPA 2 on real robots</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">A different path to intelligence</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">Why this matters</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>React, or plan?</h2>
+  <p class="drop">Watch how a language model works and you'll notice it never really looks ahead. It produces one token, then the next, then the next — each a locally sensible guess, with no internal picture of where the whole thing is going. It's astonishingly good at this. But it is, at its core, <span class="hl">reacting</span>.</p>
+  <p>Now think about how you cross a busy street, or reach for a mug at the edge of a table. You don't react blindly. You run a quick simulation in your head — <em>if I step now, that car arrives; if I grab there, the mug tips</em> — and you pick the action whose imagined outcome you like best. You <span class="hl-gold">plan by imagining</span>. To do that, you need something a reactive model lacks: an internal model of how the world responds to what you do.</p>
+  <figure>
+    <img src="figures/fig1.png" alt="Two panels: a reactive LLM marching token-by-token with a blindfold (no model of consequences), versus a world model branching into several imagined futures, scoring them, and acting on the best.">
+    <figcaption><span class="fig-label">Fig 1</span> React, or plan? A reactive model guesses the next step blind; a world model imagines what each action leads to, then chooses.</figcaption>
+  </figure>
+  <p>That internal model is a <span class="hl">world model</span>, and building a good one has been a quiet obsession of Yann LeCun's for years — his proposed path beyond the limits of pure language models. The whole challenge comes down to one deceptively hard question: how do you teach a machine to predict the future well enough to plan with it? The first instinct turns out to be a trap.</p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>The trouble with predicting everything</h2>
+  <p class="drop">The obvious way to build a world model is to have it predict the future <em>literally</em> — show it a video, hide the next frame, and train it to draw that frame back, pixel for pixel. This is the generative approach, and it sounds reasonable until you consider what it forces the model to do.</p>
+  <p>To reproduce the next frame exactly, the model has to predict <span class="hl">everything</span> — including all the things that are genuinely unpredictable. The precise flicker of a light. The exact texture of every leaf. The random shimmer of noise in the background. None of that matters for deciding what to do, yet the model burns enormous capacity trying to nail it, and gets punished for failing at the impossible.</p>
+  <figure>
+    <img src="figures/fig2.png" alt="A past frame predicting a future frame pixel-by-pixel, annotated with unpredictable details — exact leaf texture, light flicker, background noise — each marked as wasted effort.">
+    <figcaption><span class="fig-label">Fig 2</span> Predicting every pixel forces the model to model noise it can't predict and detail that doesn't matter — capacity spent on the wrong thing.</figcaption>
+  </figure>
+  <p>This is the deep reason image- and video-generators, for all their beauty, have struggled as world models for <em>planning</em>. They're spending their effort on appearance, not consequence. JEPA's founding insight is to refuse this bargain entirely — to predict the future at a level where the unpredictable junk has already been <span class="hl-gold">thrown away.</span></p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>Predict the gist, not the pixels</h2>
+  <p class="drop">JEPA — the Joint Embedding Predictive Architecture — changes <em>what</em> the model predicts. Instead of predicting the future as pixels, it predicts the future as <span class="hl">meaning</span>: an abstract summary, an embedding, that captures the objects, the layout, the motion — and ignores the texture.</p>
+  <p>The machinery has three parts. A <strong>context encoder</strong> turns what the model can see into an embedding. A <strong>target encoder</strong> turns the hidden part (the thing to predict) into its own embedding. And a <strong>predictor</strong> tries to guess the target's embedding from the context's. Training just nudges the predicted embedding toward the real one — the comparison happens entirely in <span class="hl-gold">latent space</span>, never in pixels.</p>
+  <figure>
+    <img src="figures/fig3.png" alt="The JEPA architecture: a context image and a target image each pass through an encoder to embeddings; a predictor guesses the target embedding from the context, and the two are compared in latent space as the loss.">
+    <figcaption><span class="fig-label">Fig 3</span> JEPA: encode both halves, predict the hidden half's <em>embedding</em> from the visible half, and compare in latent space — learning meaning, discarding texture.</figcaption>
+  </figure>
+  <p>There's one subtlety worth naming. If you're not careful, the model finds a cheap cheat: map <em>everything</em> to the same constant embedding and the prediction is always trivially "correct." This is called collapse, and JEPA blocks it with a clever asymmetry — the target encoder is a slow-moving copy that gets no gradient, plus a nudge to keep embeddings spread out. With that in place, the model is forced to predict <span class="hl">real structure</span>. And once it can predict structure, it can do something a generator never could cleanly: it can plan.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Planning by imagining</h2>
+  <p class="drop">Here's where the world model earns its name. Add one ingredient — let the predictor take an <span class="hl">action</span> as input — and you can ask it a powerful question: <em>if I did this, what would the world look like next?</em> Crucially, the answer comes back as a latent state, not a picture, so you can ask it over and over, cheaply.</p>
+  <p>Planning then becomes a search through imagined futures. From where you are now, you sample a hundred-odd candidate action sequences. You roll each one forward inside the world model — five, ten steps ahead, all in latent space. You score each imagined ending against your <span class="hl-gold">goal</span> (handed to the model as a goal image). You take the first move of whichever plan came closest — then, a step later, you imagine again. Engineers call this model-predictive control; you can just call it thinking ahead.</p>
+  <figure>
+    <img src="figures/fig4.png" alt="From the current latent state, three candidate action sequences roll forward in latent space; each imagined final state is scored against a goal-image embedding, the closest is chosen, and its first action is executed.">
+    <figcaption><span class="fig-label">Fig 4</span> Planning by imagining: roll candidate action sequences forward in latent space, keep the one whose imagined outcome best matches the goal, do its first move — then re-plan.</figcaption>
+  </figure>
+  <div class="pull-quote">A generator asks, "what will the next frame look like?" A world model asks, "what would happen if I did this?"</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Proof: V-JEPA 2 on real robots</h2>
+  <p class="drop">For a long time this was a beautiful theory in search of a result. Then, in 2025, Meta's <span class="hl">V-JEPA 2</span> made it concrete — and the way it did so is the most striking part of the story.</p>
+  <p>First it learned how the world moves by watching <span class="hl">over a million hours</span> of ordinary internet video — mostly people doing things, almost no robots. Then, to let it plan actions, the team added action-conditioning using just <span class="hl-gold">about 62 hours</span> of unlabeled robot footage. That's it. No data from the labs it would be tested in, no task-specific rewards.</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">1M+</span><span class="lbl">hours of internet video to learn from</span></div>
+    <div class="stat"><span class="num">~62 hrs</span><span class="lbl">of robot footage to add actions</span></div>
+    <div class="stat"><span class="num">65–80%</span><span class="lbl">zero-shot success in new labs</span></div>
+  </div>
+  <p>Dropped onto a robot arm in a lab it had never encountered, and handed a task simply as a <em>goal image</em>, V-JEPA 2 planned and executed real manipulations — <span class="hl">reaching, grasping, pick-and-place</span> — at 65–80% success, entirely zero-shot. A generic video model, trained mostly on humans, cheaply taught to act, and then trusted to control real hardware in an unfamiliar room. That's the headline that made people pay attention.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="A three-stage pipeline: pretrain on 1M+ hours of internet video, add actions with ~62 hours of robot footage, then deploy zero-shot on a robot arm in a new lab with goal-image tasks at 65-80% success.">
+    <figcaption><span class="fig-label">Fig 5</span> V-JEPA 2: learn the world from internet video, add actions cheaply, then control real robot arms zero-shot in unseen labs — tasks given as goal images.</figcaption>
+  </figure>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>A different path to intelligence</h2>
+  <p class="drop">It's tempting to frame this as world models <em>versus</em> language models, but that misreads it. They're built for different jobs, and the honest view is that they're <span class="hl">complementary</span>.</p>
+  <p>An LLM is a reactive virtuoso of language — it models the statistics of text and is unmatched at it. A JEPA world model is the opposite kind of thing: it models physics, motion and space, it predicts in fast latent space rather than token by token, and it can plan — but it is no language reasoner. LeCun's bet isn't that one replaces the other; it's that <span class="hl-gold">a model of the physical world, and the ability to plan inside it, is the missing half</span> sitting on top of what LLMs already do well.</p>
+  <figure>
+    <img src="figures/fig6.png" alt="Two columns comparing an autoregressive LLM (reacts token-by-token, models text, slow, weak at physical planning) with a JEPA world model (plans by imagining, models physics, fast latent prediction, not a language reasoner), framed as complementary.">
+    <figcaption><span class="fig-label">Fig 6</span> Complementary, not rivals: an LLM reacts and reasons in language; a world model plans and grasps physics. LeCun's bet is that the second is the missing half.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">Question it answers</div>
+      <div class="cell">Autoregressive LLM</div>
+      <div class="cell">JEPA world model</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>What does it predict?</strong></div>
+      <div class="cell">The next token (a word)</div>
+      <div class="cell">The next state, as an embedding</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>How does it decide?</strong></div>
+      <div class="cell">Reacts, one step at a time</div>
+      <div class="cell">Imagines futures and plans</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>What's it best at?</strong></div>
+      <div class="cell">Language, knowledge, text reasoning</div>
+      <div class="cell">Physics, motion, control — but early</div>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Why this matters</h2>
+  <p class="drop">Keep two things in mind, and be honest about both. The first: this is still <span class="hl">early</span>. V-JEPA 2 plans short-horizon physical tasks, not long chains of abstract reasoning; it's a striking proof of concept, not a finished mind. Anyone telling you world models have already eclipsed LLMs is getting ahead of the evidence.</p>
+  <p>The second, though, is why the idea is worth your attention. Almost everything intelligent does <span class="hl-gold">two</span> things — it understands the world, and it acts in it by anticipating consequences. Today's AI is brilliant at the first half through language and shaky at the second. World models are the most serious attempt to build that second half: to predict, cheaply and abstractly, what happens next, and to choose accordingly.</p>
+  <p>The shift to carry away is small but deep. For a few years we equated "smarter AI" with "better at predicting the next word." A world model quietly insists the more important question is the older one every animal answers all day long: <span class="hl">not what comes next, but what would happen if I did this.</span></p>
+  <div class="marginalia">One concept, explained simply. If "world model" now reads to you as "a model you can imagine futures inside and plan with," the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">An LLM predicts the next word. A world model imagines what would happen if it acted.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 23, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
