@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>The Wrong Answers Are the Lesson — Knowledge Distillation — A Visual Walkthrough</title>
+<meta name="description" content="Knowledge distillation trains a small student to mimic a big teacher's soft labels — the 'dark knowledge' behind nearly every small model you can run. A visual walkthrough of soft labels, temperature, the training loop, and how DeepSeek-R1 was distilled into small students." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="Knowledge Distillation: how big models teach small ones" />
+<meta property="og:description" content="Soft labels, temperature, and the 'dark knowledge' behind nearly every small model you can run — and how DeepSeek-R1 was distilled into small reasoners." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/knowledge-distillation/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/knowledge-distillation/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Knowledge Distillation: how big models teach small ones" />
+<meta name="twitter:description" content="Soft labels, temperature, and the 'dark knowledge' behind nearly every small model you can run — and how DeepSeek-R1 was distilled into small reasoners." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/knowledge-distillation/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 14 — Model compression</span>
+    <span class="small-caps">Jun 24, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">Knowledge distillation: how a big teacher trains a small student</p>
+  <h1 class="anim" style="animation-delay:.15s">The wrong answers<br>are the <em>lesson</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">Almost every small model you can actually run — the one on your laptop, the cheap one behind an app — learned to be smart by copying a bigger one. The technique is called knowledge distillation, and its central trick is delightfully counterintuitive: the student learns most not from the right answers, but from how confidently the teacher is <em>wrong</em>.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>Introduced by Geoffrey Hinton and colleagues in 2015, distillation trains a compact <em>student</em> to mimic a large <em>teacher's</em> full probability distribution — its "soft labels" — not just the final answer. Those soft labels carry hidden structure Hinton called <em>dark knowledge</em>. It's the same idea that, in 2026, turned DeepSeek-R1's reasoning into models small enough to run anywhere.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">The teacher you can't deploy</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">The wrong answers are the lesson</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">Turning up the temperature</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">How a student learns from a teacher</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">Distilling a reasoning model</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">Why nearly every small model is distilled</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">Why this matters</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>The teacher you can't deploy</h2>
+  <p class="drop">The best AI models are, increasingly, monsters — hundreds of billions or trillions of parameters, demanding racks of expensive accelerators just to answer a question. They're brilliant, and they're almost impossible to put in your pocket. So the field has a standing problem: how do you get that brilliance into something small, cheap, and fast enough to actually deploy?</p>
+  <p>One option is to train a small model from scratch and hope. It rarely works well — a small model learning alone, from raw data, plateaus far below its giant cousin. The better option is to let the giant <span class="hl">teach</span>. Take the big model as a "teacher," take a small model as a "student," and transfer what the teacher knows directly into the student. That transfer is <span class="hl-gold">knowledge distillation.</span></p>
+  <figure>
+    <img src="figures/fig1.png" alt="A large heavy 'teacher' frontier model on the left with a DISTILL arrow transferring to a small light 'student' model on the right that runs on a laptop or phone.">
+    <figcaption><span class="fig-label">Fig 1</span> Distillation moves what a giant model knows into a small one you can actually deploy — the same capability, a fraction of the size.</figcaption>
+  </figure>
+  <p>The name evokes the right image: boil away the bulk, keep the essence. But the genius of distillation isn't in shrinking the model — that part is easy, you just pick a smaller architecture. The genius is in <em>what</em> you teach it with. And that turns out to hinge on a piece of information almost everyone throws away.</p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>The wrong answers are the lesson</h2>
+  <p class="drop">Picture training a model to recognise handwritten digits. The normal way uses a <span class="hl">hard label</span>: this image is a "7," full stop. In the math, that's a vector with a 1 on "7" and a 0 on everything else. It's correct — but look at how much it throws away. It declares every wrong answer equally wrong. A "1" is just as wrong as an "8," which is just as wrong as a "4."</p>
+  <p>But that's not how a good teacher sees it. Show the teacher a sloppy "7" and it'll say: <em>88% a seven — but honestly, a bit like a one, and a touch like a nine.</em> That full distribution is the <span class="hl-gold">soft label</span>, and the small probabilities on the wrong answers are pure gold. They encode which digits actually look alike — a whole map of similarity the hard label erased.</p>
+  <figure>
+    <img src="figures/fig2.png" alt="A digit 7 with two bar charts: a hard label (all probability on 7, everything else zero) versus a soft label (mostly 7, small bars on 1 and 9, the look-alikes).">
+    <figcaption><span class="fig-label">Fig 2</span> A hard label says only what's right; the teacher's soft labels also say which wrong answers are <em>close</em> — that hidden structure is the lesson.</figcaption>
+  </figure>
+  <p>Hinton gave this hidden structure a wonderful name: <span class="hl">dark knowledge</span>. It's everything the teacher has learned about how concepts relate, sitting quietly in the tiny probabilities we normally round to zero. A single soft label teaches the student more than a hard one ever could — which is why a distilled student can learn so much, so fast. The only catch: in a confident teacher, those telltale small probabilities are <em>vanishingly</em> small. You need a way to bring them out.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>Turning up the temperature</h2>
+  <p class="drop">A well-trained teacher is confident, and confidence is the enemy here. Ask it about that "7" and it might say 99.7% seven, with the "one" and "nine" buried at 0.2% and 0.1%. The dark knowledge is there, but it's too faint for the student to learn from. We need to turn it up.</p>
+  <p>The knob for this is called <span class="hl">temperature</span>. The final step that turns a model's raw scores into probabilities — the softmax — has a temperature setting, and raising it <em>softens</em> the distribution: the tall spike comes down, the buried runner-ups rise into view. Set the temperature higher during distillation and suddenly the teacher's similarity map is legible. But there's a sweet spot — crank it too high and every option flattens to roughly equal, washing the knowledge back out.</p>
+  <figure>
+    <img src="figures/fig3.png" alt="The same teacher logits shown at three temperatures: T=1 a sharp spike (hides runner-ups), T=4 softened with visible smaller bars (just right), T=100 nearly flat (over-smoothed, info lost).">
+    <figcaption><span class="fig-label">Fig 3</span> Temperature softens the teacher's probabilities to expose the close wrong answers — too low hides them, too high washes them out.</figcaption>
+  </figure>
+  <p>It's a small, almost mischievous trick: deliberately make the confident teacher less certain, just long enough to read its mind. With the dark knowledge now visible, the only thing left is to actually pour it into the student.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>How a student learns from a teacher</h2>
+  <p class="drop">The training loop itself is simple, and once you've seen the soft labels it almost designs itself. The same example is shown to both models at once. The teacher — <span class="hl">frozen</span>, its weights never changing — produces its softened distribution. The student, still learning, produces its own.</p>
+  <p>Then you measure the gap between the two distributions (with a standard quantity called <span class="hl-gold">KL divergence</span>, which is just "how far apart are these two probability distributions") and nudge the student to close it. Repeat over millions of examples and the student's outputs gradually slide into agreement with the teacher's — not just on the answers, but on the entire shape of its judgments. Often you add a second term so the student also gets the true answer right, blending real labels with the teacher's wisdom.</p>
+  <figure>
+    <img src="figures/fig4.png" alt="An input fed to a frozen teacher (producing soft targets at temperature T) and a student (producing its distribution); the loss is KL divergence between them, plus the optional true label, updating only the student.">
+    <figcaption><span class="fig-label">Fig 4</span> Both see the same example; only the student learns, nudged until its distribution matches the frozen teacher's softened one.</figcaption>
+  </figure>
+  <div class="pull-quote">A hard label tells the student the answer. A soft label tells it how the teacher thinks.</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Distilling a reasoning model</h2>
+  <p class="drop">That classic recipe was built for classifiers choosing between digits or objects. Today's headline use is different and, if anything, simpler to picture: distilling the <span class="hl">reasoning</span> of a giant model into a small one. This is how the famous small "reasoning" models of 2026 were born.</p>
+  <p>The modern twist is to let the teacher <em>think out loud</em>. A model like DeepSeek-R1 doesn't just output an answer — it writes a long chain of thought, step by step, to get there. So the recipe becomes: have the teacher solve hundreds of thousands of problems with its full reasoning shown, collect those trajectories, and <span class="hl-gold">fine-tune the student on them</span>. DeepSeek curated roughly <span class="hl">800,000</span> verified reasoning traces and trained small Qwen and Llama students on them — plain supervised fine-tuning, no reinforcement learning required. The student learns to imitate not just <em>what</em> the teacher concluded, but <em>how</em> it reasoned its way there.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="A pipeline: teacher (DeepSeek-R1) generates full chain-of-thought trajectories, ~800,000 verified traces are collected, and a small student (Qwen/Llama) is fine-tuned on them to reason the same way.">
+    <figcaption><span class="fig-label">Fig 5</span> Modern LLM distillation: the teacher writes out its full chain of thought, and a small student is fine-tuned on hundreds of thousands of those traces.</figcaption>
+  </figure>
+  <p>There's an even cleverer variant gaining ground, called <em>on-policy</em> distillation: instead of feeding the student a fixed pile of the teacher's old answers, you let the student attempt problems <em>itself</em> and have the teacher correct it as it goes — fixing the subtle mismatch between practising on someone else's work and doing your own. But the core idea is unchanged: the teacher's reasoning becomes the student's curriculum.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>Why nearly every small model is distilled</h2>
+  <p class="drop">Here's the payoff that made distillation the quiet backbone of the small-model era. When DeepSeek compared approaches, the distilled students didn't just do <em>okay</em> — they <span class="hl">beat</span> small models trained from scratch with expensive reinforcement learning. The shortcut wasn't a compromise; it was better.</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">2015</span><span class="lbl">Hinton et al. introduce the idea</span></div>
+    <div class="stat"><span class="num">~800K</span><span class="lbl">R1 reasoning traces distilled</span></div>
+    <div class="stat"><span class="num">&gt; from-scratch</span><span class="lbl">distilled students win at equal size</span></div>
+  </div>
+  <p>That result generalises. The compact, capable open models you actually download and run are, overwhelmingly, students of something larger. Distillation is the bridge from a lab's frontier model to a model on your machine. But it's worth being honest about the limits. A student is fundamentally <span class="hl-gold">capped by its teacher</span> — it can approach the teacher's ability but rarely exceed it — and it faithfully inherits the teacher's blind spots and biases along with its strengths. And when the teacher is a closed model you can only query, not inspect, you're distilling through a keyhole.</p>
+  <figure>
+    <img src="figures/fig6.png" alt="Three ways to get a small capable model — train from scratch (weak), RL on the small model (expensive, hits a ceiling), distill from a teacher (cheap, strong) — plus why distillation wins and the catch that a student can't exceed its teacher.">
+    <figcaption><span class="fig-label">Fig 6</span> An honest ledger: distilled students beat same-size from-scratch models and power most small models you can run — but a student is only ever as good as its teacher.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">How to get a small, capable model</div>
+      <div class="cell">What happens</div>
+      <div class="cell">Verdict</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Train from scratch</strong></div>
+      <div class="cell">Small model learns alone from raw data</div>
+      <div class="cell">Plateaus well below the frontier</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>RL on the small model</strong></div>
+      <div class="cell">Reinforcement-learn the small model directly</div>
+      <div class="cell">Costly, and hits a lower ceiling</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Distill from a teacher</strong></div>
+      <div class="cell">Train the student on the teacher's outputs</div>
+      <div class="cell">Cheap, strong — the usual winner</div>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Why this matters</h2>
+  <p class="drop">Step back and distillation reframes what "training a model" even means. We tend to imagine learning as a solitary act — a model facing a mountain of data alone. But the most efficient way we've found to make a capable small model isn't solitary at all. It's <span class="hl">apprenticeship</span>: a smaller mind learning at the elbow of a larger one.</p>
+  <p>That's why this unglamorous technique quietly underwrites so much of what you actually use. The reason a genuinely smart model can run on a phone, the reason an app can afford to call one a million times a day, the reason your VibeThinker-style small reasoner exists at all — it's very often because somewhere upstream, a giant taught a small one how to think.</p>
+  <p>The lesson worth keeping is the one we started with, and it's almost philosophical. The richest signal a teacher offers isn't the verdict — it's the <span class="hl-gold">shape of the uncertainty</span> behind it: which wrong answers it found tempting, and how strongly. We spent years training models on hard answers and rounding the rest to zero. Distillation's quiet insight is that the part we rounded away was the most valuable part of all.</p>
+  <div class="marginalia">One concept, explained simply. If "soft labels" now reads to you as "the teacher showing its work, including which wrong answers it almost picked," the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">The richest thing a teacher shares isn't the answer — it's which wrong answers it almost picked.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 24, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
