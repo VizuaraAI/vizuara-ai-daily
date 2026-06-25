@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>The Loop That Makes an Agent — Agent Harnesses — A Visual Walkthrough</title>
+<meta name="description" content="An LLM alone just predicts text; a harness — a loop, tools, memory, and control — turns it into an agent that acts. A visual walkthrough of the agent loop (ReAct), tool use, memory and context rot, the control plane, and why agents are a systems problem." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="Agent Harnesses: the loop that turns an LLM into an agent" />
+<meta property="og:description" content="Perceive, plan, act, observe — plus tools, memory, and control. The scaffolding behind 2026's AI agents, and why most of the engineering is in the harness, not the model." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/agent-harness/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/agent-harness/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Agent Harnesses: the loop that turns an LLM into an agent" />
+<meta name="twitter:description" content="Perceive, plan, act, observe — plus tools, memory, and control. The scaffolding behind 2026's AI agents, and why most of the engineering is in the harness, not the model." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/agent-harness/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 15 — How agents are built</span>
+    <span class="small-caps">Jun 25, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">Agent harnesses: the scaffolding that turns an LLM into a doer</p>
+  <h1 class="anim" style="animation-delay:.15s">The loop that<br>makes an <em>agent</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">2026 is the year "the model" stopped being the whole story. The most capable AI systems you use now aren't a single clever answer — they're an agent: a model running in a loop, calling tools, keeping notes, and recovering from its own mistakes. The thing that makes that possible has a name — the harness — and a quiet truth: most of the engineering lives there, not in the model.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>An "agent harness" is the runtime layer wrapped around a language model — built, in the 2026 consensus, from four parts: a <em>loop</em>, a <em>tool interface</em>, <em>context management</em>, and <em>control</em>. It's the difference between a model that answers a question and one that books the flight, fixes the bug, or runs the research. We'll build the picture piece by piece.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">The harness is the difference</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">The loop: think, act, observe</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">Tools: the agent's hands</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">Memory and the war on context rot</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">The control plane</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">Why agents are hard</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">Why this matters</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>The harness is the difference</h2>
+  <p class="drop">A language model, on its own, does exactly one thing: you give it text, it gives you text back. That's it. It can't search the web, run code, open a file, or check whether what it just said was true. It is a brilliant one-shot guesser — and a one-shot guesser, however brilliant, is not an agent.</p>
+  <p>An <span class="hl">agent</span> is what you get when you wrap that model in scaffolding that lets it <em>act</em> — and then loop. Give it a way to take actions, a way to see the results, a memory to track what it's doing, and rules to keep it safe, and suddenly the same model can carry out a multi-step task in the real world. That wrapper has a name: the <span class="hl-gold">harness</span>.</p>
+  <figure>
+    <img src="figures/fig1.png" alt="Left: a bare LLM, prompt in and text out, takes no actions. Right: the same LLM inside a larger box labeled THE HARNESS with a loop, tools, memory, and control attached, taking real actions in the world.">
+    <figcaption><span class="fig-label">Fig 1</span> A model alone just predicts text. Wrap it in a harness — a loop, tools, memory, and control — and it becomes an agent that can actually do things.</figcaption>
+  </figure>
+  <p>Here's the part that surprises people new to the field. We talk endlessly about which <em>model</em> is best, but the gap between a flaky agent demo and a dependable one usually isn't the model at all — it's the harness around it. As the people building these systems like to put it: <span class="hl">most agent engineering happens in the harness, not the model.</span> So let's take it apart. It has four pieces.</p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>The loop: think, act, observe</h2>
+  <p class="drop">The first and most important piece is the <span class="hl">loop</span>. A normal model call is a straight line: question in, answer out, done. An agent replaces that line with a cycle. It <em>thinks</em> about what to do next, takes an <em>action</em>, <em>observes</em> what happened — and then goes back to thinking, now wiser for having seen the result. Round and round until the task is finished.</p>
+  <p>This is the famous <span class="hl-gold">ReAct</span> pattern — short for Reason + Act — and the magic is entirely in the "observe." A model that answers once is flying blind; it commits to a whole plan before seeing whether step one even worked. A model in the loop gets a feedback signal between every move. It can notice a failed command, a wrong turn, an unexpected result — and adjust. That single difference is what turns reasoning into <em>doing</em>.</p>
+  <figure>
+    <img src="figures/fig2.png" alt="A circular loop of three stages — Think/Plan, Act (call a tool), Observe (read the result) — cycling back to Think, with a central goal, contrasted with a greyed one-shot LLM that answers once.">
+    <figcaption><span class="fig-label">Fig 2</span> The agent loop (ReAct): think, take an action, observe the result, repeat — seeing what happened between steps is what lets it recover and adapt.</figcaption>
+  </figure>
+  <p>It sounds almost too simple to matter, but the loop is the spine of every agent. Everything else — the tools, the memory, the safety rails — exists to make each turn of this cycle smarter and safer. Speaking of which: what exactly is the agent <em>acting</em> with?</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>Tools: the agent's hands</h2>
+  <p class="drop">The model can think, but it can't <em>touch</em> anything. To actually do work it needs <span class="hl">tools</span> — and tools are the second piece of the harness. A tool is any action the agent can take: searching the web, running code, reading and writing files, browsing a page, calling an API.</p>
+  <p>The mechanism is cleaner than it sounds. The model doesn't run the tool itself; it just <em>asks</em> for it. It emits a small, structured <span class="hl-gold">tool call</span> — the digital equivalent of "please run <code>search('flights to Tokyo')</code>" — and the harness takes over: it runs that tool, safely, and hands the result back into the loop as a fresh observation. Thought goes out as a request; action comes back as a result.</p>
+  <figure>
+    <img src="figures/fig3.png" alt="The LLM emits a structured tool call; the harness runs it in a sandbox across tools (web search, code execution, files, browser, APIs) and returns the result as an observation.">
+    <figcaption><span class="fig-label">Fig 3</span> Tools are the agent's hands: the model writes a structured tool call, the harness runs it safely, and the result comes back as an observation.</figcaption>
+  </figure>
+  <p>This indirection is also where safety begins. Because the harness — not the model — is the thing that actually executes, it can run tools inside a sandbox, refuse dangerous ones, and pause for a human before anything irreversible. The model proposes; the harness disposes. But give an agent tools and let it run for a while, and a new problem appears — one of memory.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Memory and the war on context rot</h2>
+  <p class="drop">Every turn of the loop dumps more into the model's context window: the last thought, the tool call, and — often the biggest culprit — the tool's output, which can be a giant wall of text. Let that pile up over a long task and you hit a wall we've met before in this series: <span class="hl">context rot</span>, where a stuffed window quietly degrades the model's ability to attend to what matters.</p>
+  <p>Managing this is the harness's third job, and it splits memory in two. <span class="hl-gold">Short-term</span> memory is the working context — and the harness keeps it lean, summarising and pruning stale tool output so the window stays sharp. <span class="hl-gold">Long-term</span> memory lives <em>outside</em> the window entirely: the harness writes durable facts out to files — a running <code>todo.md</code>, notes, a memory store — that the agent can re-read on demand. A tidy scratchpad for now; a filing cabinet for everything else.</p>
+  <figure>
+    <img src="figures/fig4.png" alt="A context window overflowing with tool outputs (context rot), and two harness fixes: short-term working memory trimmed by compaction/summarization, and long-term memory externalized to files like todo.md.">
+    <figcaption><span class="fig-label">Fig 4</span> The harness keeps working memory lean — summarising and dropping stale output — and pushes durable facts out to files the agent can re-read, fighting context rot.</figcaption>
+  </figure>
+  <div class="pull-quote">We argue about which model is smartest. The agent's reliability is usually decided by the harness around it.</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>The control plane</h2>
+  <p class="drop">Loop, tools, memory — three pieces down. The fourth is the least glamorous and, for real deployments, the most important: <span class="hl">control</span>. An agent that can run code and call APIs on your behalf is powerful and, unsupervised, a little terrifying. The control layer is what makes it trustworthy.</p>
+  <p>This is why people have started calling the harness an <span class="hl-gold">operating system</span> for the model — the model is the CPU, the harness is the OS around it. It runs actions inside <em>sandboxes</em> to limit the blast radius of a mistake; it enforces <em>guardrails and approval gates</em>, pausing for a human before anything risky; it provides <em>observability</em> — tracing, logs, cost tracking — so you can see what the agent did and why; and it can <em>route</em> each step to a different model, sending easy steps to a cheap one and hard reasoning to a frontier one.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="A model chip labeled 'the CPU' wrapped in a large box 'THE HARNESS = the operating system', surrounded by control tiles: sandbox, guardrails and approval gates, observability, cache/cost control, and model routing.">
+    <figcaption><span class="fig-label">Fig 5</span> The harness as an operating system around the model — sandboxing actions, gating risky ones, tracking cost, and routing each step to the right model.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">The four pieces</div>
+      <div class="cell">What it is</div>
+      <div class="cell">What it gives the agent</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>The loop</strong></div>
+      <div class="cell">Think → act → observe, repeated</div>
+      <div class="cell">The ability to course-correct on feedback</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Tools</strong></div>
+      <div class="cell">Structured calls the harness executes</div>
+      <div class="cell">Hands — a way to act in the world</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Context &amp; memory</strong></div>
+      <div class="cell">Lean working window + externalized store</div>
+      <div class="cell">Focus now, recall later</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Control</strong></div>
+      <div class="cell">Sandboxes, gates, observability, routing</div>
+      <div class="cell">Safety, trust, and cost discipline</div>
+    </div>
+  </div>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>Why agents are hard</h2>
+  <p class="drop">It's worth being honest about why, despite the hype, reliable agents are still genuinely hard to build — because the difficulties are exactly what the harness exists to fight. The core enemy is the long horizon. Over a hundred-step task, small errors <span class="hl">compound</span>: one wrong turn early, uncorrected, can quietly derail everything after it.</p>
+  <p>The failure modes are by now familiar to anyone who's built one. Context rots as the task drags on. Agents get stuck in loops, repeating themselves. They hallucinate tool calls or malform them. Costs and latency creep up with every extra turn. None of these are solved by a smarter model alone — they're <span class="hl-gold">systems problems</span>, and the harness is the system. A good one adds recovery (re-injecting the original goal into a freshly cleaned context when the agent drifts), verification between steps, sandboxes and approval gates, and the observability to catch trouble early.</p>
+  <figure>
+    <img src="figures/fig6.png" alt="Two columns: where agents fail (errors compound, context rot, loops, hallucinated tool calls, cost) and what a good harness adds (recovery, verification, sandboxes and approval, memory management, observability).">
+    <figcaption><span class="fig-label">Fig 6</span> Agents fail in predictable ways over long tasks; the harness is precisely the engineering — recovery, verification, guardrails — that makes them dependable.</figcaption>
+  </figure>
+  <p>This is the real reason "the harness is the difference" isn't a slogan. Two teams can use the identical frontier model and ship wildly different agents, because one invested in the loop, the memory and the guardrails — and the other just called the model in a <code>while</code> loop and hoped.</p>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Why this matters</h2>
+  <p class="drop">For a few years the entire AI story was a story about models — bigger, smarter, the next checkpoint. Agent harnesses mark the moment that story changed. The frontier didn't stop moving, but a second frontier opened up <em>around</em> the model: the engineering of the system that lets it act in the world reliably.</p>
+  <p>That's why "agent" became the word of 2026. The thing that books your travel, refactors your codebase, or runs a research task overnight isn't a new model so much as a familiar model placed inside a much better <span class="hl">harness</span> — one that loops carefully, uses tools safely, manages its own memory, and knows when to stop and ask. The intelligence was already there; the harness is what finally let it <em>do</em> something with it.</p>
+  <p>So the shift to keep is this. When you hear that an AI can now <em>act</em>, don't picture a smarter brain — picture a good brain finally given <span class="hl-gold">hands, a memory, and a careful set of rules</span>. In 2026, that scaffolding is where much of the real progress is being made — and it's the least glamorous, most consequential engineering in the field.</p>
+  <div class="marginalia">One concept, explained simply. If "agent harness" now reads to you as "the loop, tools, memory, and guardrails wrapped around a model," the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">The model is the brain. The harness is the hands, the memory, and the rules.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 25, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
