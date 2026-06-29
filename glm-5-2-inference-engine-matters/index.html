@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>The Engine Matters More Than the Bits — GLM-5.2 Inference Report — Vizuara AI Daily</title>
+<meta name="description" content="We deployed GLM-5.2 — the 744B open-weight MoE — two ways across 8×H200 GPUs and measured what actually decides how a model feels in production. Both configs were 8-bit. The gap was 9×. Almost all of it was the engine." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview. URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="The engine matters more than the bits — GLM-5.2 Inference Report" />
+<meta property="og:description" content="744B MoE, 8×H200, two 8-bit configs, one 9× throughput gap. We measured it. Almost all of it was the serving stack, not the quantization." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/glm-5-2-inference-engine-matters/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/glm-5-2-inference-engine-matters/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="The engine matters more than the bits — GLM-5.2 Inference Report" />
+<meta name="twitter:description" content="744B MoE, 8×H200, two 8-bit configs, one 9× throughput gap. We measured it. Almost all of it was the serving stack, not the quantization." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/glm-5-2-inference-engine-matters/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figure .chart-wrap {
+    max-width: 680px; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+    overflow: hidden;
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .num.violet { color: var(--violet); }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row.four-col { grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr; }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  .verdict-table .cell.fp8 { color: var(--violet); font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; }
+  .verdict-table .cell.q8 { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; }
+  .verdict-table .cell.winner { background: rgba(114,86,154,0.06); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .row.four-col { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+
+  /* Insight cards grid */
+  .insight-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 2.5rem 0;
+  }
+  .insight-card {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.12);
+    border-radius: 4px; padding: 1.75rem;
+  }
+  .insight-card h4 { font-size: 1.15rem; font-weight: 600; margin-bottom: 0.75rem; margin-top: 0; }
+  .insight-card p { font-size: 0.95rem; color: var(--ink-soft); margin-bottom: 0; max-width: none; }
+  @media (max-width: 768px) { .insight-grid { grid-template-columns: 1fr; } }
+
+  /* Setup table */
+  .setup-table {
+    width: 100%; margin: 2.5rem 0; border-collapse: collapse;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.92rem;
+    border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+  }
+  .setup-table thead tr { background: var(--ink); color: var(--paper); }
+  .setup-table thead th {
+    padding: 0.85rem 1.1rem; text-align: left; font-size: 0.72rem;
+    letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600;
+  }
+  .setup-table tbody tr { border-bottom: 1px solid rgba(40,30,20,0.1); }
+  .setup-table tbody tr:last-child { border-bottom: none; }
+  .setup-table tbody td { padding: 1rem 1.1rem; vertical-align: top; line-height: 1.4; }
+  .setup-table .config-fp8 { color: var(--violet); font-weight: 700; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
+  .setup-table .config-q8 { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
+  .setup-table .config-q4 { color: var(--ink-faint); font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
+  .status-ok { color: var(--green); font-weight: 600; }
+  .status-warn { color: var(--gold); font-weight: 600; }
+  .callout {
+    border-left: 3px solid var(--violet); background: rgba(114,86,154,0.06);
+    padding: 1rem 1.25rem; margin: 1.5rem 0; border-radius: 0 3px 3px 0;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem; line-height: 1.5;
+  }
+  .callout strong { color: var(--violet); }
+
+  /* Numbered list for field notes */
+  .field-list { list-style: none; margin: 2rem 0; }
+  .field-list li {
+    display: flex; gap: 1.25rem; align-items: flex-start;
+    border-top: 1px solid rgba(40,30,20,0.1); padding: 1.25rem 0;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.97rem; line-height: 1.55;
+  }
+  .field-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.1); }
+  .field-list .fn {
+    flex-shrink: 0; width: 2rem; height: 2rem; border-radius: 50%;
+    background: var(--violet); color: white; font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem; display: flex; align-items: center; justify-content: center;
+    font-weight: 700;
+  }
+  .field-list li strong { font-weight: 700; }
+
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 17 — Inference engineering</span>
+    <span class="small-caps">Jun 29, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">GLM-5.2 · 744B MoE · Served on Modal · 8×H200</p>
+  <h1 class="anim" style="animation-delay:.15s">Don't guess,<br><em>just measure.</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">We deployed GLM-5.2 — the 744B open-weight Mixture-of-Experts, barely 13 days old — two different ways across 8×H200 GPUs on Modal, and measured what actually decides how a model feels in production. Both configs were "8-bit." The gap was 9×. Almost all of it was the engine.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>GLM-5.2 is a 744B-parameter Mixture-of-Experts model with roughly 40B active parameters per forward pass — released by Zhipu AI (Z.ai) in June 2026. We ran two builds: the native FP8 model on vLLM 0.23.0, and the Q8_0 GGUF via llama.cpp. Four concurrency levels. Three metrics. One clear lesson about how much the serving stack matters once you get past the model card.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">The model — 744B MoE</a><span class="pg">Setup</span></li>
+    <li><span class="num">02</span><a href="#s2">Two "8-bit" builds, one gap you didn't see coming</a><span class="pg">FP8 vs Q8</span></li>
+    <li><span class="num">03</span><a href="#s3">Throughput — one engine scales, the other doesn't</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">04</span><a href="#s4">Latency — flat versus catastrophic</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">05</span><a href="#s5">Full results — every level, both configs</a><span class="pg">Tables</span></li>
+    <li><span class="num">06</span><a href="#s6">What the data says</a><span class="pg">4 insights</span></li>
+    <li><span class="num">07</span><a href="#s7">Field notes — what it took to serve a 13-day-old model</a><span class="pg">Ops</span></li>
+    <li><span class="num">08</span><a href="#s8">Why this matters</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>The model — 744B parameters, ~40B active</h2>
+  <p class="drop">Mixture-of-Experts sounds exotic until you see it from the compute side: instead of running every neuron in the network for every token, an MoE model keeps most of its parameters idle and activates only a fraction of them per forward pass. GLM-5.2 has 744 billion parameters spread across its expert layers, but only roughly <span class="hl">40 billion are active</span> when it processes any given token. That is the number that matters for latency: it is what actually sits on the GPU doing work.</p>
+  <p>The practical consequence is that a 744B model behaves a lot more like a ~40B model in terms of arithmetic intensity. You still need to store all 744B weights somewhere — in our case, 744 GB for the FP8 build — but the per-token compute cost is that of a 40B dense model. This is the bargain MoE trades: more memory, less FLOPs per token, and meaningfully different scaling behaviour once you start batching requests together.</p>
+  <p>GLM-5.2 was 13 days old when we ran these benchmarks, released by Zhipu AI on June 13, 2026. It is a reasoning model — it streams a <code>thinking</code> chain before its answer — and Zhipu ships it natively in FP8 format, not BF16. The full-precision BF16 version would require approximately 1.49 TB of GPU memory, which simply doesn't fit a single 8-GPU node. FP8 at 744 GB is the correct reference point, not a compromise.</p>
+
+  <table class="setup-table">
+    <thead>
+      <tr>
+        <th>Configuration</th>
+        <th>Weights</th>
+        <th>Engine</th>
+        <th>GPU</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="config-fp8">FP8 — full reference</span></td>
+        <td>GLM-5.2-FP8 · 744 GB</td>
+        <td>vLLM 0.23.0</td>
+        <td>8×H200</td>
+        <td><span class="status-ok">recorded</span></td>
+      </tr>
+      <tr>
+        <td><span class="config-q8">Q8_0 — unsloth GGUF</span></td>
+        <td>unsloth GGUF · 744 GB</td>
+        <td>llama.cpp</td>
+        <td>8×H200</td>
+        <td><span class="status-ok">recorded</span></td>
+      </tr>
+      <tr>
+        <td><span class="config-q4">Q4 — UD-Q4_K_M</span></td>
+        <td>unsloth GGUF · 400 GB</td>
+        <td>llama.cpp</td>
+        <td>8×H100</td>
+        <td><span class="status-warn">not completed</span></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="callout"><strong>FP8 is the genuine full model</strong>, not a lossy quantization — Z.ai ships GLM-5.2 natively in FP8, and BF16 (~1.49 TB) won't fit a single 8-GPU node anyway. So FP8-on-8×H200 is the correct, non-lossy reference point.</div>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>Two "8-bit" builds, one gap you didn't see coming</h2>
+  <p class="drop">Before the results, it's worth being precise about what "8-bit" means in each case — because <span class="hl">the same number of bits can mean completely different things</span> once a model is actually running on hardware.</p>
+  <p>FP8 is a floating-point format. The NVIDIA H200 GPU's tensor cores speak FP8 natively — there is dedicated silicon on the chip, the DeepGEMM kernel, that can multiply FP8 matrices at full hardware throughput without any conversion step. When vLLM serves GLM-5.2-FP8, every matrix multiply in the model's attention and MLP layers runs directly on those tensor cores. The weights sit in FP8, the activations run in FP8, and the hardware is doing exactly what it was designed for.</p>
+  <p>Q8_0 is a different beast. This is the llama.cpp quantization format — the weights are stored as 8-bit integers, but Q8_0 integers are not something Hopper's tensor cores understand natively. When llama.cpp runs a matrix multiply, it first has to <span class="hl-gold">dequantize</span> the Q8 weights back to a higher-precision format the hardware can compute with, do the multiply, then move on. That dequantization step is not free. It is pure overhead on every forward pass, for every layer, for every token in every request.</p>
+  <div class="formula">FP8: weights → tensor cores directly &nbsp;|&nbsp; Q8_0: weights → <em>dequantize</em> → BF16 → tensor cores</div>
+  <p>Both configs start with 8 bits per weight in memory. The difference is not how much memory they use — it's <span class="hl">whether the arithmetic ever has to stop and translate</span>. FP8 never does. Q8_0 always does. Add continuous batching, paged key-value memory, and CUDA graph capture to the FP8 path (via vLLM) versus the more conservative serving approach of llama.cpp, and you have two systems that share a description — "8-bit" — but very little else.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>Throughput — one engine scales, the other doesn't</h2>
+  <p class="drop">At a single concurrent request, the two configs feel roughly comparable. FP8 delivers 56 tokens per second system-wide; Q8 delivers 36. A <span class="hl">1.6× edge</span> for FP8, which is meaningful but not shocking. You might conclude: "8-bit is 8-bit, the gap is modest, and the cheaper setup is close enough."</p>
+  <p>Then you add concurrency. At 8 simultaneous requests, FP8 is at 330 tok/s and Q8 is at 80. At 32, FP8 is at 779 and Q8 at 123. At 64 concurrent requests — the kind of load that represents a real deployment serving actual users — FP8 reaches <span class="hl-violet">1694 tokens per second</span>. Q8 plateaus at 186. That is a <span class="hl">9.1× gap</span>, and it didn't exist at low load. It emerged as batching revealed what each engine can actually do.</p>
+
+  <!-- Chart 1: Throughput bar chart -->
+  <figure>
+    <div class="chart-wrap">
+      <svg viewBox="0 0 640 310" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;padding:20px 0 10px">
+        <!-- title -->
+        <text x="320" y="22" text-anchor="middle" font-family="Inter Tight,sans-serif" font-size="12" fill="#6b6359" letter-spacing="0.1em" text-transform="uppercase">SYSTEM OUTPUT THROUGHPUT — tokens / second (higher is better)</text>
+
+        <!-- Y axis lines -->
+        <line x1="75" y1="45" x2="600" y2="45" stroke="#6b6359" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <line x1="75" y1="93" x2="600" y2="93" stroke="#6b6359" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <line x1="75" y1="141" x2="600" y2="141" stroke="#6b6359" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <line x1="75" y1="189" x2="600" y2="189" stroke="#6b6359" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <line x1="75" y1="237" x2="600" y2="237" stroke="#3d3833" stroke-width="1"/>
+
+        <!-- Y axis labels -->
+        <text x="68" y="49" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6b6359">1700</text>
+        <text x="68" y="97" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6b6359">1275</text>
+        <text x="68" y="145" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6b6359">850</text>
+        <text x="68" y="193" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6b6359">425</text>
+        <text x="68" y="241" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6b6359">0</text>
+
+        <!-- Group: c=1 -->
+        <!-- FP8: 56/1700*192=6.3 → y=237-6.3=230.7 -->
+        <rect x="110" y="230" width="36" height="7" fill="#72569a" rx="1"/>
+        <text x="128" y="226" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#72569a" font-weight="700">56</text>
+        <!-- Q8: 36/1700*192=4.1 → y=237-4.1=232.9 -->
+        <rect x="152" y="233" width="36" height="4" fill="#1a1815" rx="1"/>
+        <text x="170" y="229" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#1a1815" font-weight="700">36</text>
+        <text x="149" y="256" text-anchor="middle" font-family="Inter Tight,sans-serif" font-size="11" fill="#6b6359">c = 1</text>
+
+        <!-- Group: c=8 -->
+        <!-- FP8: 330/1700*192=37.3 → y=237-37.3=199.7 -->
+        <rect x="239" y="200" width="36" height="37" fill="#72569a" rx="1"/>
+        <text x="257" y="196" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#72569a" font-weight="700">330</text>
+        <!-- Q8: 80/1700*192=9.0 → y=237-9=228 -->
+        <rect x="281" y="228" width="36" height="9" fill="#1a1815" rx="1"/>
+        <text x="299" y="224" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#1a1815" font-weight="700">80</text>
+        <text x="278" y="256" text-anchor="middle" font-family="Inter Tight,sans-serif" font-size="11" fill="#6b6359">c = 8</text>
+
+        <!-- Group: c=32 -->
+        <!-- FP8: 779/1700*192=88.1 → y=237-88.1=148.9 -->
+        <rect x="368" y="149" width="36" height="88" fill="#72569a" rx="1"/>
+        <text x="386" y="145" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#72569a" font-weight="700">779</text>
+        <!-- Q8: 123/1700*192=13.9 → y=237-13.9=223.1 -->
+        <rect x="410" y="223" width="36" height="14" fill="#1a1815" rx="1"/>
+        <text x="428" y="219" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#1a1815" font-weight="700">123</text>
+        <text x="407" y="256" text-anchor="middle" font-family="Inter Tight,sans-serif" font-size="11" fill="#6b6359">c = 32</text>
+
+        <!-- Group: c=64 -->
+        <!-- FP8: 1694/1700*192=191.3 → y=237-191.3=45.7 -->
+        <rect x="497" y="46" width="36" height="191" fill="#72569a" rx="1"/>
+        <text x="515" y="42" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#72569a" font-weight="700">1694</text>
+        <!-- Q8: 186/1700*192=21.0 → y=237-21=216 -->
+        <rect x="539" y="216" width="36" height="21" fill="#1a1815" rx="1"/>
+        <text x="557" y="212" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#1a1815" font-weight="700">186</text>
+        <text x="536" y="256" text-anchor="middle" font-family="Inter Tight,sans-serif" font-size="11" fill="#6b6359">c = 64</text>
+
+        <!-- Legend -->
+        <rect x="75" y="272" width="12" height="12" fill="#72569a" rx="2"/>
+        <text x="92" y="282" font-family="Inter Tight,sans-serif" font-size="11" fill="#3d3833">FP8 · vLLM</text>
+        <rect x="190" y="272" width="12" height="12" fill="#1a1815" rx="2"/>
+        <text x="207" y="282" font-family="Inter Tight,sans-serif" font-size="11" fill="#3d3833">Q8 · llama.cpp</text>
+        <text x="400" y="282" font-family="Inter Tight,sans-serif" font-size="11" fill="#6b6359" font-style="italic">concurrency →</text>
+      </svg>
+    </div>
+    <figcaption><span class="fig-label">Fig 1</span> FP8 on vLLM scales continuously with concurrency — 56 to 1694 tok/s — while Q8 on llama.cpp plateaus near 186. The 9.1× gap at peak load is almost entirely the serving engine, not the weight format.</figcaption>
+  </figure>
+
+  <p>What drives the FP8 divergence is vLLM's continuous batching. Instead of waiting for a request to finish before starting the next one, vLLM interleaves generation steps across requests — every decode iteration can include tokens from dozens of in-flight requests simultaneously. Paged key-value memory eliminates wasted KV cache allocations. CUDA graph capture turns the decode loop into a pre-compiled GPU operation with minimal Python overhead. Put it together and you have a system that gets more efficient as concurrency grows, not less.</p>
+  <div class="marginalia">The Q4 run (UD-Q4_K_M, ~400 GB) never completed — loading 744 GB over Modal's 9P network storage repeatedly stalled; one Q8 load alone took 84 minutes. The code was correct; Q8 ran end-to-end on the same path. It's an infrastructure throughput issue, not a model issue.</div>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Latency — flat versus catastrophic</h2>
+  <p class="drop">Throughput tells you how much work a system can do. Inter-token latency tells you how the system <span class="hl">feels</span> to a user. They can diverge in ways that matter: a system can have high throughput while individual users experience long waits between tokens, if the serving engine doesn't manage request isolation cleanly.</p>
+  <p>At a single stream, FP8 decodes at 17.6 ms/token. Q8 decodes at 27.4 ms/token. Both feel fine. FP8 has a <span class="hl-gold">1.55× edge</span> even at low load — Hopper's native FP8 tensor cores versus the dequantize-every-layer path — but neither is unusably slow. A 17 ms inter-token latency is imperceptible to a human reader.</p>
+  <p>Then you scale. At 8 concurrent users, FP8 is at 20.1 ms/token — barely changed. At 32 concurrent users, it's 20.9 ms/token. At 64 concurrent users, <span class="hl-violet">22.5 ms/token</span>. The FP8 line on the chart below is essentially flat. Q8's inter-token latency under the same load degrades 12-fold: from 27 ms to 332 ms at 64 concurrent users. That is the difference between streaming text that reads naturally and a system where each word appears after a third of a second of silence.</p>
+
+  <!-- Chart 2: Inter-token latency line chart -->
+  <figure>
+    <div class="chart-wrap">
+      <svg viewBox="0 0 640 310" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;padding:20px 0 10px">
+        <!-- title -->
+        <text x="320" y="22" text-anchor="middle" font-family="Inter Tight,sans-serif" font-size="12" fill="#6b6359" letter-spacing="0.1em">INTER-TOKEN LATENCY — ms / token (lower &amp; flatter is better)</text>
+
+        <!-- Y axis lines -->
+        <line x1="75" y1="45" x2="590" y2="45" stroke="#6b6359" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <line x1="75" y1="96" x2="590" y2="96" stroke="#6b6359" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <line x1="75" y1="147" x2="590" y2="147" stroke="#6b6359" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <line x1="75" y1="198" x2="590" y2="198" stroke="#6b6359" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <line x1="75" y1="247" x2="590" y2="247" stroke="#3d3833" stroke-width="1"/>
+
+        <!-- Y axis labels: 0, 90, 180, 270, 360 -->
+        <text x="68" y="49" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6b6359">360</text>
+        <text x="68" y="100" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6b6359">270</text>
+        <text x="68" y="151" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6b6359">180</text>
+        <text x="68" y="202" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6b6359">90</text>
+        <text x="68" y="251" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6b6359">0</text>
+
+        <!-- X axis positions: c=1→148, c=8→276, c=32→404, c=64→532 -->
+
+        <!-- Q8 line: y = 247 - val*(202/360) -->
+        <!-- Q8 values: 27.4→232, 92.7→195, 248.2→108, 331.7→61 -->
+        <polyline points="148,232 276,195 404,108 532,61" fill="none" stroke="#1a1815" stroke-width="2.5" stroke-linejoin="round"/>
+
+        <!-- Q8 data point circles -->
+        <circle cx="148" cy="232" r="5" fill="#1a1815"/>
+        <circle cx="276" cy="195" r="5" fill="#1a1815"/>
+        <circle cx="404" cy="108" r="5" fill="#1a1815"/>
+        <circle cx="532" cy="61" r="5" fill="#1a1815"/>
+
+        <!-- Q8 value labels -->
+        <text x="148" y="228" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#1a1815" font-weight="700">27</text>
+        <text x="276" y="191" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#1a1815" font-weight="700">93</text>
+        <text x="404" y="104" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#1a1815" font-weight="700">248</text>
+        <text x="532" y="57" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="10" fill="#1a1815" font-weight="700">332</text>
+
+        <!-- FP8 line: y = 247 - val*(202/360) -->
+        <!-- FP8 values: 17.6→237, 20.1→236, 20.9→235, 22.5→234 (nearly flat ~235) -->
+        <polyline points="148,237 276,236 404,235 532,234" fill="none" stroke="#72569a" stroke-width="2.5" stroke-linejoin="round"/>
+
+        <!-- FP8 data point circles -->
+        <circle cx="148" cy="237" r="5" fill="#72569a"/>
+        <circle cx="276" cy="236" r="5" fill="#72569a"/>
+        <circle cx="404" cy="235" r="5" fill="#72569a"/>
+        <circle cx="532" cy="234" r="5" fill="#72569a"/>
+
+        <!-- FP8 flat annotation -->
+        <text x="540" y="225" text-anchor="start" font-family="JetBrains Mono,monospace" font-size="9.5" fill="#72569a" font-weight="700">~22 ms, flat</text>
+
+        <!-- X axis labels -->
+        <text x="148" y="262" text-anchor="middle" font-family="Inter Tight,sans-serif" font-size="11" fill="#6b6359">c = 1</text>
+        <text x="276" y="262" text-anchor="middle" font-family="Inter Tight,sans-serif" font-size="11" fill="#6b6359">c = 8</text>
+        <text x="404" y="262" text-anchor="middle" font-family="Inter Tight,sans-serif" font-size="11" fill="#6b6359">c = 32</text>
+        <text x="532" y="262" text-anchor="middle" font-family="Inter Tight,sans-serif" font-size="11" fill="#6b6359">c = 64</text>
+
+        <!-- Legend -->
+        <line x1="75" y1="278" x2="95" y2="278" stroke="#72569a" stroke-width="2.5"/>
+        <circle cx="85" cy="278" r="4" fill="#72569a"/>
+        <text x="100" y="282" font-family="Inter Tight,sans-serif" font-size="11" fill="#3d3833">FP8 · vLLM</text>
+        <line x1="195" y1="278" x2="215" y2="278" stroke="#1a1815" stroke-width="2.5"/>
+        <circle cx="205" cy="278" r="4" fill="#1a1815"/>
+        <text x="220" y="282" font-family="Inter Tight,sans-serif" font-size="11" fill="#3d3833">Q8 · llama.cpp</text>
+      </svg>
+    </div>
+    <figcaption><span class="fig-label">Fig 2</span> FP8 inter-token latency barely moves under load (17.6 to 22.5 ms) — vLLM's continuous batching keeps per-token cost flat. Q8 collapses 12× under the same load (27 to 332 ms), a direct result of sequential per-request decoding and dequantization overhead.</figcaption>
+  </figure>
+
+  <div class="pull-quote">When you deploy an open model, the inference stack you choose can matter more than the precision you quantize to.</div>
+
+  <p>The reason FP8 stays flat is vLLM's continuous batching. The serving engine runs a decode loop where each iteration processes one generation step for every active request simultaneously. The per-token cost doesn't multiply with concurrency — it amortizes. More requests in flight means more useful work per GPU clock cycle, not more overhead per user. The throughput grows; the per-token latency barely budges.</p>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Full results — every level, both configs</h2>
+  <p>Here are the complete numbers across all four concurrency levels for both metrics. Time-to-first-token (TTFT) is where the user is waiting after submitting a prompt. Inter-token latency is what they feel during streaming generation.</p>
+
+  <div class="two-col" style="align-items:start">
+    <div>
+      <p class="small-caps" style="margin-bottom:1rem">Time to first token · p50 (ms)</p>
+      <div class="verdict-table" style="margin-top:0">
+        <div class="row four-col head" style="grid-template-columns:1.2fr 1fr 1fr 1fr 1fr">
+          <div class="cell"></div>
+          <div class="cell">C=1</div>
+          <div class="cell">C=8</div>
+          <div class="cell">C=32</div>
+          <div class="cell">C=64</div>
+        </div>
+        <div class="row four-col" style="grid-template-columns:1.2fr 1fr 1fr 1fr 1fr">
+          <div class="cell"><strong>FP8</strong></div>
+          <div class="cell fp8 winner">96</div>
+          <div class="cell fp8 winner">392</div>
+          <div class="cell q8">5228</div>
+          <div class="cell fp8 winner">3285</div>
+        </div>
+        <div class="row four-col" style="grid-template-columns:1.2fr 1fr 1fr 1fr 1fr">
+          <div class="cell"><strong>Q8</strong></div>
+          <div class="cell q8 winner">75</div>
+          <div class="cell q8 winner">268</div>
+          <div class="cell fp8 winner">1243</div>
+          <div class="cell q8">4219</div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <p class="small-caps" style="margin-bottom:1rem">Inter-token latency · p50 (ms/tok)</p>
+      <div class="verdict-table" style="margin-top:0">
+        <div class="row four-col head" style="grid-template-columns:1.2fr 1fr 1fr 1fr 1fr">
+          <div class="cell"></div>
+          <div class="cell">C=1</div>
+          <div class="cell">C=8</div>
+          <div class="cell">C=32</div>
+          <div class="cell">C=64</div>
+        </div>
+        <div class="row four-col" style="grid-template-columns:1.2fr 1fr 1fr 1fr 1fr">
+          <div class="cell"><strong>FP8</strong></div>
+          <div class="cell fp8 winner">17.6</div>
+          <div class="cell fp8 winner">20.1</div>
+          <div class="cell fp8 winner">20.9</div>
+          <div class="cell fp8 winner">22.5</div>
+        </div>
+        <div class="row four-col" style="grid-template-columns:1.2fr 1fr 1fr 1fr 1fr">
+          <div class="cell"><strong>Q8</strong></div>
+          <div class="cell q8">27.4</div>
+          <div class="cell q8">92.7</div>
+          <div class="cell q8">248.2</div>
+          <div class="cell q8">331.7</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="small-caps" style="margin-bottom:1rem">System output throughput (tok/s)</p>
+  <div class="verdict-table">
+    <div class="row head" style="grid-template-columns:1.6fr 1fr 1fr 1fr 1fr 1fr">
+      <div class="cell"></div>
+      <div class="cell">C=1</div>
+      <div class="cell">C=8</div>
+      <div class="cell">C=32</div>
+      <div class="cell">C=64</div>
+      <div class="cell">Req/s @64</div>
+    </div>
+    <div class="row" style="grid-template-columns:1.6fr 1fr 1fr 1fr 1fr 1fr">
+      <div class="cell"><strong>FP8 · vLLM</strong></div>
+      <div class="cell fp8">56</div>
+      <div class="cell fp8">330</div>
+      <div class="cell fp8">779</div>
+      <div class="cell fp8 winner">1694</div>
+      <div class="cell fp8 winner">6.62</div>
+    </div>
+    <div class="row" style="grid-template-columns:1.6fr 1fr 1fr 1fr 1fr 1fr">
+      <div class="cell"><strong>Q8 · llama.cpp</strong></div>
+      <div class="cell q8">36</div>
+      <div class="cell q8">80</div>
+      <div class="cell q8">123</div>
+      <div class="cell q8">186</div>
+      <div class="cell q8">0.73</div>
+    </div>
+  </div>
+
+  <p>One number worth watching in the TTFT table: at c=32, Q8 actually beats FP8 (1243 ms vs 5228 ms). This is an artifact of the prefill phase — llama.cpp's sequential processing starts decoding earlier for each individual request, while vLLM was dealing with a larger prefill queue across all 32 simultaneous requests. At c=64, vLLM's batching advantage reasserts itself decisively. The median TTFT at high load is best understood alongside the p99 tail: at c=32 and above, both configs see p99 TTFT climbing to 10–12 seconds as requests queue for a decode slot.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>What the data says</h2>
+  <p class="drop">Four patterns jump out clearly from the numbers. Each one is a concrete, actionable lesson about what matters when you move from "which quantization format should I use?" to "what is my system actually going to do at load?"</p>
+
+  <div class="stat-grid">
+    <div class="stat"><span class="num violet">9.1×</span><span class="lbl">higher throughput for FP8 at 64-way concurrency (1694 vs 186 tok/s)</span></div>
+    <div class="stat"><span class="num">22.5<small style="font-size:1rem">ms</small></span><span class="lbl">FP8 inter-token latency under full load — essentially flat from single stream</span></div>
+    <div class="stat"><span class="num">12×</span><span class="lbl">Q8 inter-token latency degrades under load (27 to 332 ms)</span></div>
+  </div>
+
+  <div class="insight-grid">
+    <div class="insight-card">
+      <h4>Fewer bits does not mean faster</h4>
+      <p>At a single stream, FP8 decodes at <strong>17.6 ms/token</strong> vs Q8's 27.4 — a 1.55× edge, despite both being 8-bit. FP8 maps straight onto Hopper's dedicated FP8 tensor cores via DeepGEMM. llama.cpp dequantizes Q8 to BF16 for every matrix multiply. Same bit count on disk; different arithmetic at runtime.</p>
+    </div>
+    <div class="insight-card">
+      <h4>Batching is the whole game</h4>
+      <p>FP8 inter-token latency barely moves (17.6 to 22.5 ms) as concurrency rises 64×. Q8 collapses 12×. vLLM's continuous batching + paged KV memory + CUDA-graph decode keep per-token cost flat under load. llama.cpp processes requests more sequentially, so each new user multiplies the per-token cost.</p>
+    </div>
+    <div class="insight-card">
+      <h4>Throughput diverges 9×</h4>
+      <p>FP8 scales to 1694 tok/s at 64-way load; Q8 plateaus near 186. Almost all of this gap is the engine, not the quantization. If you ran Q8 through vLLM with native hardware support, you would see a very different curve. The gap is a property of the full stack — format plus engine together — not the format alone.</p>
+    </div>
+    <div class="insight-card">
+      <h4>Tails reveal queueing</h4>
+      <p>p99 TTFT climbs to ~10–12 seconds at c=32 for both configs as requests wait for a decode slot. The median looks fine; the 99th percentile tells the truth about what occasional users experience. Latency SLOs should be specified and measured at the tail, not the median. If you're debugging user complaints, check p99 first.</p>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Field notes — what it took to serve a 13-day-old model</h2>
+  <p class="drop">Running a model that had been publicly available for 13 days before we benchmarked it meant working through integration issues that older, more battle-tested models don't have. These are the practical notes — the kind of things that cost hours to debug and take ten seconds to read.</p>
+
+  <ul class="field-list">
+    <li>
+      <span class="fn">1</span>
+      <span><strong>Current Transformers required.</strong> <code>vllm==0.23.0</code> requires <code>transformers&ge;5.9</code>. Older builds reject the <code>glm_moe_dsa</code> architecture silently or with unhelpful errors. Pin both versions explicitly.</span>
+    </li>
+    <li>
+      <span class="fn">2</span>
+      <span><strong>Sparse attention needs DeepGEMM.</strong> GLM-5.2's DSA / "IndexShare" sparse attention mechanism hard-requires DeepGEMM — meaning a full CUDA toolkit must be available at runtime, not just at build time. A slim Docker image fails with: <code style="font-size:0.82em">Sparse Attention Indexer requires DeepGEMM.</code> Include the full toolkit in your container.</span>
+    </li>
+    <li>
+      <span class="fn">3</span>
+      <span><strong>llama.cpp needs <code>--no-mmap</code> off network storage.</strong> Default mmap over Modal's 9P network volume stalls on the 744 GB sequential read. Pass <code>--no-mmap</code> to force sequential loading into RAM. Still slow: one Q8 load took 84 minutes.</span>
+    </li>
+    <li>
+      <span class="fn">4</span>
+      <span><strong>GLM-5.2 is a reasoning model.</strong> llama.cpp streams thinking tokens as <code>reasoning_content</code>, not <code>content</code> — the two fields are separate in the response structure. A benchmark client that only counts <code>content</code> tokens will read zero output. Count both fields or your throughput numbers will be zero.</span>
+    </li>
+    <li>
+      <span class="fn">5</span>
+      <span><strong>Cold start is long.</strong> FP8 on 8×H200 takes approximately 10 minutes to load weights, followed by ~22 minutes of <code>torch.compile</code> and CUDA graph capture before the first token can be served. Budget for this in Modal timeout settings and cost calculations.</span>
+    </li>
+  </ul>
+
+  <div class="callout" style="margin-top:2rem">
+    <strong>Caveats about what this compares:</strong> This is engine + quantization together, not quantization alone. FP8/vLLM vs Q8/llama.cpp differ in both the numerical format and the entire serving stack — almost all of the ~9× throughput gap is the engine. The clean quant-only comparison is Q8 vs Q4 within llama.cpp, which we could not complete due to infrastructure constraints. Speculative decoding (GLM-5.2 ships an MTP layer) was off for both runs — enabling EAGLE-style spec-decode is a natural and likely large next lever. No accuracy evaluation: these are latency and throughput only.
+  </div>
+</section>
+
+<section id="s8">
+  <span class="section-num">08</span>
+  <h2>Why this matters</h2>
+  <p class="drop">The open-weight inference landscape is developing a new common assumption: that once you choose a model and pick your quantization level, the hard decisions are made. The bits are the budget. A smaller bit-count is a faster, cheaper model. But the GLM-5.2 numbers tell a different story.</p>
+  <p>Two configs at the same bit-width, 744 GB of weights each, running on the same cluster of 8 H200s — and they deliver 9× different throughput at scale. The weight format alone didn't do that. The dequantize-to-compute penalty didn't do 9× alone either. The gap is the product of four things layered together: the arithmetic path (native FP8 vs dequantize), the batching strategy (continuous vs sequential), the memory management (paged KV vs flat allocation), and the decode optimization (CUDA graphs vs interpreted Python loop). Those four things are almost entirely determined by the <span class="hl">serving engine you choose</span>, not the precision you quantize to.</p>
+  <p>The practical lesson for anyone deploying open models at scale: measure the full stack, not just the model card. The numbers on the spec sheet (parameter count, active parameters, context window) tell you what the model can do. The serving engine is what determines whether it can do it at the concurrency and latency your application requires. Run your own benchmarks at your target concurrency level. The single-stream numbers will lie to you.</p>
+  <p>GLM-5.2 itself is worth watching. At 40B effective active parameters, it's one of the most capable open-weight MoE models available, and Zhipu's choice to ship in native FP8 means the reference deployment is already tuned for the hardware that matters. The model is 13 days old as of this writing. The tooling will catch up. The benchmarks will improve. But the fundamental lesson — <span class="hl-violet">the engine matters more than the bits</span> — will stay true for any model you run.</p>
+  <div class="marginalia">One benchmark report, explained plainly. The motto for the run: don't guess, just measure. And we measured a 9× gap that wasn't in the model card. Run on Modal · teamvizuara · 2026-06-26.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">Don't guess, just measure — and sometimes the engine is the whole story.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 29, 2026 · GLM-5.2 · 744B MoE · Modal · 8×H200</p>
+</footer>
+
+</body>
+</html>

@@ -103,6 +103,12 @@
     <div class="list-head">The archive</div>
 
     <!-- ARTICLES:START — newest first; the skill prepends new entries here -->
+    <a class="article-row" href="glm-5-2-inference-engine-matters/">
+      <div class="meta"><span>Jun 29, 2026</span><span class="tag">inference</span><span class="tag">benchmarks</span></div>
+      <h2>The Engine Matters More Than the Bits — GLM-5.2 Inference Report</h2>
+      <p>We deployed GLM-5.2 — the 744B open-weight MoE, barely 13 days old — two ways across 8×H200 GPUs on Modal. Both configs were "8-bit." The throughput gap at 64 concurrent users was 9×. Almost all of it was the serving engine, not the quantization. A benchmark report with the actual numbers, what each config was doing at the hardware level, and what the divergence means for anyone deploying open models at scale.</p>
+      <span class="go">Read the benchmark report →</span>
+    </a>
     <a class="article-row" href="rope-rotary-position/">
       <div class="meta"><span>Jun 26, 2026</span><span class="tag">fundamentals</span><span class="tag">transformers</span></div>
       <h2>Position Is a Rotation — RoPE, Explained</h2>
