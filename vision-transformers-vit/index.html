@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>An Image Is Worth 16×16 Words — Vision Transformers — A Visual Walkthrough</title>
+<meta name="description" content="Vision Transformers chop an image into patches and treat each like a word token, then run the exact same transformer that powers language. A visual walkthrough of patchify, patch embeddings, global attention, and why ViT became the backbone of multimodal AI." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="Vision Transformers: how a transformer learned to see" />
+<meta property="og:description" content="Chop an image into patches, treat each like a word — and run the same transformer that powers language. The idea that let vision join the transformer world, explained simply." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/vision-transformers-vit/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/vision-transformers-vit/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Vision Transformers: how a transformer learned to see" />
+<meta name="twitter:description" content="Chop an image into patches, treat each like a word — and run the same transformer that powers language. The idea that let vision join the transformer world, explained simply." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/vision-transformers-vit/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 18 — How models see</span>
+    <span class="small-caps">Jun 30, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">Vision Transformers: how a language model learned to see</p>
+  <h1 class="anim" style="animation-delay:.15s">An image is worth<br>16&times;16 <em>words</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">For a decade, computer vision belonged to convolutional networks — machines built from the ground up around images. Then a 2020 paper asked a heretical question: what if we didn't build anything special for vision at all? What if we just chopped an image into little squares, called each one a "word," and fed them to the exact same transformer that reads language? It worked — and it rewired the whole field.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>The Vision Transformer (Dosovitskiy et al., Google, 2020) takes an image, splits it into a grid of fixed-size <em>patches</em>, turns each patch into a token, and runs a plain transformer encoder — no convolutions anywhere. It needs a lot of data to shine, but once pre-trained at scale it matches or beats CNNs, and its "image = patches" idea became the backbone of nearly every multimodal model since.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">Can a language model see?</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">An image is worth 16&times;16 words</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">From patch to token</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">The same transformer, on patches</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">Seeing the whole image at once</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">The catch, and the payoff</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">Why this matters</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>Can a language model see?</h2>
+  <p class="drop">For most of the deep-learning era, vision and language were separate worlds with separate machines. Language ran on transformers. Vision ran on <span class="hl">convolutional neural networks</span> — CNNs — which slide small learnable filters across an image, looking for edges, then textures, then shapes, building understanding up from local pieces.</p>
+  <p>CNNs work so well because they come with assumptions baked in: that nearby pixels are related (locality), and that a cat is a cat wherever it appears in the frame (translation invariance). Those assumptions are a gift on small datasets — the model doesn't have to learn them from scratch. But they're also a straitjacket. So in 2020 a group at Google asked something almost provocative: what if we throw all that away and feed an image to the <span class="hl-gold">plain transformer</span> we already use for text?</p>
+  <figure>
+    <img src="figures/fig1.png" alt="Left: a CNN sliding small filters across an image with locality built in. Right: the question of feeding an image into the same transformer used for language, with no vision-specific machinery.">
+    <figcaption><span class="fig-label">Fig 1</span> For a decade CNNs owned vision, with locality baked in. Vision Transformers ask a bold question: can the same transformer that reads language also see?</figcaption>
+  </figure>
+  <p>It sounds like it shouldn't work. A transformer expects a <em>sequence of tokens</em> — words. An image is a grid of pixels. The entire trick of the Vision Transformer is a single, almost cheeky move that bridges those two things. And it's right there in the paper's title.</p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>An image is worth 16&times;16 words</h2>
+  <p class="drop">The paper is called "An Image is Worth 16&times;16 Words," and that title <em>is</em> the idea. Instead of processing an image pixel by pixel, you cut it into a grid of small, fixed-size squares — <span class="hl">patches</span> — and treat each patch as if it were a word in a sentence.</p>
+  <p>Take a standard 224&times;224 image and slice it into 16&times;16-pixel patches. You get a neat 14&times;14 grid — <span class="hl-gold">196 patches</span> in all. Then you simply read them out in order, left to right, top to bottom, into a single sequence: patch 1, patch 2, all the way to patch 196. An image, unrolled, now looks exactly like a sentence of tokens — and a transformer knows precisely what to do with one of those.</p>
+  <figure>
+    <img src="figures/fig2.png" alt="A 224x224 image overlaid with a grid of 16x16 patches (a 14x14 grid = 196 patches), with an arrow unrolling the patches into a horizontal sequence of tokens.">
+    <figcaption><span class="fig-label">Fig 2</span> Chop the image into a grid of small patches and read them out as a sequence — suddenly an image looks exactly like a sentence of tokens.</figcaption>
+  </figure>
+  <p>That reframing — <em>an image is a sequence of patches</em> — is the whole unlock. But a patch is still a little block of pixels, not yet a vector a transformer can consume. So there's one small conversion step to do first, for every patch.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>From patch to token</h2>
+  <p class="drop">A transformer eats <em>vectors</em> — lists of numbers of a fixed size. A patch, though, is a little 16&times;16 tile with three colour channels, which is really just a small pile of pixel values. Turning that pile into a proper token takes three quick steps.</p>
+  <p>First, <span class="hl">flatten</span> the patch — unroll its pixels into one long list of numbers. Second, run it through a <span class="hl">linear projection</span> — a single matrix multiply that compresses that list into a tidy embedding vector, the patch's "visual word." Third, and crucially, <span class="hl-gold">add a position embedding</span> — a learnable tag that records where in the grid this patch came from. (Without it, the model would treat the image as an unordered bag of patches — the same order-blindness we met with RoPE.) Now each patch is a genuine token: a vector that knows both what it looks like and where it sat.</p>
+  <figure>
+    <img src="figures/fig3.png" alt="A four-step pipeline for one patch: the 16x16x3 patch, flattened into a list, linearly projected into an embedding vector, then given a position embedding tag.">
+    <figcaption><span class="fig-label">Fig 3</span> Flatten each patch, project it into an embedding, and tag it with its position — now a patch is just a token, exactly the kind a transformer already eats.</figcaption>
+  </figure>
+  <p>Do this for all 196 patches and you have a sequence of tokens indistinguishable, as far as the transformer cares, from a sentence. Which means the next step is not a new invention at all — it's the machine you already know.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>The same transformer, on patches</h2>
+  <p class="drop">Here's the part that still delights people: once the patches are tokens, the Vision Transformer runs the <span class="hl">exact same transformer encoder</span> used for language. The self-attention, the feed-forward layers, the residual connections — all of it, unchanged. There is not a single convolution in the whole model.</p>
+  <p>There's just one small addition, borrowed straight from BERT: a special learnable token, the <span class="hl-gold">[CLS] token</span>, is prepended to the front of the patch sequence. As the sequence flows through the layers, every token attends to every other, and that [CLS] token acts as a kind of scribe, gathering information from all the patches. At the very top, its final vector — now a summary of the whole image — is passed to a small classification head that outputs the answer: <em>cat, dog, bird.</em></p>
+  <figure>
+    <img src="figures/fig4.png" alt="A [CLS] token prepended to the patch-token sequence, fed into a standard transformer encoder (self-attention + MLP), with the CLS output going to a classification head that produces a label.">
+    <figcaption><span class="fig-label">Fig 4</span> Add a CLS token, feed the patch sequence into the very same transformer encoder that powers LLMs, and read the answer off the CLS token — no convolutions anywhere.</figcaption>
+  </figure>
+  <div class="pull-quote">A convolution assumes nearby pixels matter most. A transformer assumes nothing — and learns what matters from the data.</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Seeing the whole image at once</h2>
+  <p class="drop">Running images through self-attention isn't just an elegant reuse — it changes <em>how</em> the model sees. And the difference from a CNN is fundamental. It's about how quickly a model can relate two things that are far apart in the picture.</p>
+  <p>A CNN starts <span class="hl">local</span>. In its early layers, each neuron sees only a tiny patch of the image; to connect, say, an ear in the top-left with a tail in the bottom-right, information has to travel up through many layers, its "receptive field" slowly widening. A Vision Transformer has no such patience. Through self-attention, <span class="hl-gold">every patch can attend to every other patch from the very first layer</span> — the corner and the centre are one step apart. It has a global view of the image immediately.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="Left: a CNN with a small local receptive field that grows slowly through layers. Right: a ViT where one patch attends to all other patches across the whole image from layer 1.">
+    <figcaption><span class="fig-label">Fig 5</span> A CNN pieces the image together slowly through many layers; a ViT lets any patch talk to any other patch from the first layer — global context, instantly.</figcaption>
+  </figure>
+  <p>This is a genuine strength — long-range relationships in an image are captured directly, not laboriously assembled. But that same freedom, the refusal to assume anything about images, comes at a price. And it's the catch that nearly kept Vision Transformers from working at all.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>The catch, and the payoff</h2>
+  <p class="drop">Because a Vision Transformer assumes almost nothing about images — no locality, no translation invariance — it has to <span class="hl">learn all of it from scratch</span>. And learning from scratch takes data. A lot of data. Train a ViT on a "mere" million images (ImageNet) and it actually <em>loses</em> to a well-tuned CNN, whose built-in assumptions give it a head start.</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">196</span><span class="lbl">patch tokens from a 224&times;224 image</span></div>
+    <div class="stat"><span class="num">0</span><span class="lbl">convolutions — a pure transformer</span></div>
+    <div class="stat"><span class="num">300M</span><span class="lbl">images to overtake CNNs (pretraining)</span></div>
+  </div>
+  <p>But keep feeding it. Pre-train the same ViT on a truly enormous dataset — hundreds of millions of images — and the picture flips. With enough examples, it learns those visual regularities better than they could ever be hand-coded, <span class="hl-gold">matches or exceeds</span> the best CNNs, and does so using substantially <em>less</em> compute to train. The straitjacket the CNN wore for safety turns out to be a ceiling; the transformer, given enough data, climbs right past it. And the deeper payoff wasn't the accuracy at all — it was the <span class="hl">unification</span>. Once an image is just a sequence of tokens, vision and language speak the same language.</p>
+  <figure>
+    <img src="figures/fig6.png" alt="A crossover chart showing CNN winning on small data but ViT overtaking it at large data with less compute, plus a row showing CLIP, multimodal LLMs, image generation, and V-JEPA built on ViT-style patch encoders.">
+    <figcaption><span class="fig-label">Fig 6</span> ViT needs lots of data because it assumes almost nothing — but pre-trained at scale it matches or beats CNNs, and its patch idea became the backbone of modern multimodal AI.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">Property</div>
+      <div class="cell">CNN (convolutional net)</div>
+      <div class="cell">Vision Transformer</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Built-in assumptions</strong></div>
+      <div class="cell">Locality &amp; translation invariance, baked in</div>
+      <div class="cell">Almost none — learned from data</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Data appetite</strong></div>
+      <div class="cell">Efficient on small datasets</div>
+      <div class="cell">Needs large-scale pre-training to shine</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Receptive field</strong></div>
+      <div class="cell">Local, widens slowly through layers</div>
+      <div class="cell">Global from the very first layer</div>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Why this matters</h2>
+  <p class="drop">The Vision Transformer's real legacy isn't a leaderboard score. It's that it tore down the wall between two fields. Before ViT, vision and language were engineered differently, thought about differently, built by different communities. After it, an image and a sentence were <span class="hl">the same kind of object</span> — a sequence of tokens — and could flow through the same machinery.</p>
+  <p>That's the quiet reason so much of what came next was even possible. When a model like CLIP learns to connect pictures and captions, when a chatbot can look at a photo you send it, when a video "world model" like V-JEPA predicts what happens next — under the hood, the image is almost always being chopped into patches and fed through a Vision Transformer. The patch was the adapter that let vision plug into the transformer revolution.</p>
+  <p>So the idea to carry away is smaller and bigger than "transformers can do images." It's that a change of <span class="hl-gold">representation</span> — deciding to see an image as a sentence of patches — did more than improve image classification. It let one architecture swallow the visual world, and set the stage for AI that reads, sees, and reasons across all of it at once.</p>
+  <div class="marginalia">One concept, explained simply. If "Vision Transformer" now reads to you as "cut the image into patches, treat each like a word, and run the language transformer," the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">Cut an image into patches, call each one a word — and vision could finally speak the transformer's language.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jun 30, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
