@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pull Together, Push Apart — CLIP & Contrastive Learning — A Visual Walkthrough</title>
+<meta name="description" content="CLIP learns to connect images and text by pulling matching image-caption pairs together and pushing mismatches apart — a shared space where any picture and any sentence can be compared. A visual walkthrough of the dual encoder, the contrastive grid, and zero-shot classification." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="CLIP: how a model connects images and text" />
+<meta property="og:description" content="Pull matching image-caption pairs together, push mismatches apart — the contrastive idea behind image search, DALL-E, and every multimodal model. Explained simply." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/clip-contrastive-learning/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/clip-contrastive-learning/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="CLIP: how a model connects images and text" />
+<meta name="twitter:description" content="Pull matching image-caption pairs together, push mismatches apart — the contrastive idea behind image search, DALL-E, and every multimodal model. Explained simply." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/clip-contrastive-learning/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 19 — How models see</span>
+    <span class="small-caps">Jul 1, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">CLIP: how a model learns to connect images and text</p>
+  <h1 class="anim" style="animation-delay:.15s">Pull together,<br>push <em>apart</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">Yesterday we saw how a Vision Transformer turns an image into tokens. Today, what it plugs into. CLIP takes an image encoder and a text encoder and trains them to agree — pulling a picture and its caption together in a shared space, and shoving mismatches apart. From that one idea comes image search, text-to-image generation, and the eyes of nearly every multimodal model.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>CLIP — Contrastive Language-Image Pre-training — was released by OpenAI (Radford et al.) in 2021. It learned from 400 million raw image-caption pairs scraped from the web, with no hand-labeled categories. The payoff was startling: it could classify images into <em>any</em> categories you could describe in words, zero-shot, matching a supervised ResNet-50 on ImageNet without ever seeing its labels.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">Let the caption be the label</a><span class="pg">Fig 1</span></li>
+    <li><span class="num">02</span><a href="#s2">Two towers, one space</a><span class="pg">Fig 2</span></li>
+    <li><span class="num">03</span><a href="#s3">The similarity grid</a><span class="pg">Fig 3</span></li>
+    <li><span class="num">04</span><a href="#s4">Pull together, push apart</a><span class="pg">Fig 4</span></li>
+    <li><span class="num">05</span><a href="#s5">Classify anything by describing it</a><span class="pg">Fig 5</span></li>
+    <li><span class="num">06</span><a href="#s6">What CLIP unlocked</a><span class="pg">Fig 6</span></li>
+    <li><span class="num">07</span><a href="#s7">Why this matters</a><span class="pg">Coda</span></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ============== -->
+
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>Let the caption be the label</h2>
+  <p class="drop">For years, teaching a computer to recognise images meant handing it a <span class="hl">fixed list of labels</span>. You'd assemble a dataset — say ImageNet, with its 1,000 categories — and painstakingly tag each of a million-plus images with exactly one of those words. The model learned to sort pictures into those 1,000 boxes, and only those. Ask it about anything outside the list and it was helpless.</p>
+  <p>CLIP threw that whole setup out. Instead of a curated list of labels, it learned from something the internet has in near-infinite supply: images paired with their <span class="hl-gold">natural-language captions</span>. A photo and the sentence someone wrote next to it. No taxonomy, no hand-labeling — the caption itself becomes the supervision. Do that across <span class="hl">400 million</span> image-text pairs and you get a model that has seen the visual world described in ordinary words.</p>
+  <figure>
+    <img src="figures/fig1.png" alt="Left: the old way, images tagged with single rigid labels from a fixed 1000-class list. Right: CLIP, images paired with rich full-sentence captions from the internet.">
+    <figcaption><span class="fig-label">Fig 1</span> Instead of a short list of hand-picked labels, CLIP learns from hundreds of millions of images paired with their real captions — letting plain language describe what it sees.</figcaption>
+  </figure>
+  <p>That shift — from a rigid label to a free-form caption — is what makes everything else possible. But it raises a puzzle. An image and a sentence are utterly different kinds of things. How do you train a model to see that <em>this</em> picture and <em>that</em> sentence belong together? The answer is two towers and one shared space.</p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>Two towers, one space</h2>
+  <p class="drop">CLIP is built from two separate networks — a <span class="hl">dual encoder</span>. One is an <em>image encoder</em>: give it a picture and it produces a vector, a list of numbers summarising the image. This is exactly where yesterday's Vision Transformer lives — the image is chopped into patches and turned into a single vector. The other is a <em>text encoder</em>: give it a caption and it produces a vector too.</p>
+  <p>On their own, those two vectors would live in incompatible worlds — an "image space" and a "text space" that can't be compared. CLIP's entire job is to train the two encoders so their outputs land in <span class="hl-gold">one shared embedding space</span>. In that space, a picture and a sentence are both just points — and, crucially, you can measure how close any point is to any other. Once an image and a caption are points in the same space, comparing them becomes a matter of simple geometry.</p>
+  <figure>
+    <img src="figures/fig2.png" alt="Two towers: an image encoder (a Vision Transformer) turning a photo into an image vector, and a text encoder (a Transformer) turning a caption into a text vector, both landing in one shared embedding space.">
+    <figcaption><span class="fig-label">Fig 2</span> Two separate networks — one for images, one for text — trained so their outputs live in a single shared space, where a picture and a sentence can be compared directly.</figcaption>
+  </figure>
+  <p>So the model can now turn pictures and words into comparable points. But nothing yet <em>tells</em> it which pictures and words belong together. That's the training objective — and it's the clever heart of CLIP.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>The similarity grid</h2>
+  <p class="drop">Here's how CLIP actually learns, and it's beautifully direct. Take a batch of, say, <span class="hl">N</span> image-caption pairs. Encode all N images and all N captions into vectors. Now build an <span class="hl">N&times;N grid</span>: every image down one side, every caption across the top, and in each cell, the similarity between that image and that caption.</p>
+  <p>Look at that grid and the goal is obvious. The <span class="hl-gold">diagonal</span> cells are the real pairs — image 1 with its own caption 1, image 2 with caption 2. Those should score <em>high</em>. Every other cell is a mismatch — image 1 with caption 5 — and those should score <em>low</em>. So CLIP trains on exactly that: push the similarity of the N matching pairs up, and push the N²&minus;N mismatched pairs down. One grid, one clear instruction.</p>
+  <figure>
+    <img src="figures/fig3.png" alt="An NxN grid of image-text similarities: bright vermillion on the diagonal (correct pairs, high similarity) and dark off-diagonal cells (mismatches, low similarity), with pull-up and push-down arrows.">
+    <figcaption><span class="fig-label">Fig 3</span> In every batch, CLIP scores every image against every caption, then trains the matching pairs on the diagonal to score high and every mismatch to score low.</figcaption>
+  </figure>
+  <p>This is what "contrastive" means: the model learns by <em>contrast</em> — not just what matches, but what doesn't. Every wrong pairing in the grid is a tiny lesson in what a caption is <em>not</em> about. And each of those pushes and pulls, repeated billions of times, slowly reshapes the shared space itself.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Pull together, push apart</h2>
+  <p class="drop">Step back from the grid and picture what it does to the shared space geometrically. Every matching image-caption pair is a little <span class="hl-green">spring pulling two points together</span>; every mismatch is a force pushing two points apart. Run that over hundreds of millions of examples and the space stops being random — it <em>organises itself.</em></p>
+  <p>A photo of a dog drifts toward the words "a photo of a dog." Photos of cars gather near sentences about cars. Concepts that mean similar things — regardless of whether they arrived as pixels or as text — end up as <span class="hl-gold">neighbours</span>. The space becomes a map of meaning, where nearness means relatedness, and images and captions are woven into the same fabric.</p>
+  <figure>
+    <img src="figures/fig4.png" alt="An embedding space where a matching image and caption are pulled close with a green attract arrow, a mismatched pair is pushed apart with red repel arrows, and clusters (dogs, cars, food) form mixing image and text points.">
+    <figcaption><span class="fig-label">Fig 4</span> Repeat the pull-and-push across hundreds of millions of pairs and the space arranges itself: a picture and the words that describe it become neighbours, clustered by meaning.</figcaption>
+  </figure>
+  <div class="pull-quote">A traditional model learns a fixed list of answers. CLIP learns a space where any picture and any sentence can be compared.</div>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Classify anything by describing it</h2>
+  <p class="drop">Now for the payoff that made CLIP famous, and it follows almost automatically from the shared space. Suppose you want to sort photos into categories the model was never explicitly trained on — say, your own custom list. With an old model you'd collect data and retrain. With CLIP, you do neither.</p>
+  <p>Instead, you write each category as a little sentence — <code>"a photo of a dog,"</code> <code>"a photo of a cat,"</code> <code>"a photo of a car"</code> — and run them through the text encoder to get their vectors. Then you encode the mystery image and simply ask: <span class="hl-gold">which caption's vector sits closest?</span> Whichever one wins is the answer. No retraining, no new data — you classify an image just by <em>describing</em> the options. This is <span class="hl">zero-shot classification</span>, and its most quoted result is that CLIP matched a fully-supervised ResNet-50 on ImageNet having seen zero of ImageNet's training labels.</p>
+  <figure>
+    <img src="figures/fig5.png" alt="An input image encoded into a vector, compared against text-prompt vectors ('a photo of a dog/cat/car'), with the closest one ('a photo of a cat') lighting up as the match — zero-shot classification.">
+    <figcaption><span class="fig-label">Fig 5</span> To recognise a brand-new set of categories, you don't retrain CLIP — you write the category names as sentences and pick whichever sits closest to the image.</figcaption>
+  </figure>
+  <p>Read that again, because it's the whole magic in one line: the model classifies things it was never taught to classify, purely because it learned a space where pictures and words already live together. And once you have that space, a great deal more than classification opens up.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>What CLIP unlocked</h2>
+  <p class="drop">CLIP's deepest contribution wasn't a benchmark number — it was that shared image-text space itself, which turned out to be a piece of foundational infrastructure. Once pictures and words are points in one space, an astonishing range of things becomes easy.</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">400M</span><span class="lbl">image-text pairs it learned from</span></div>
+    <div class="stat"><span class="num">2021</span><span class="lbl">Radford et al., OpenAI</span></div>
+    <div class="stat"><span class="num">zero-shot</span><span class="lbl">matched ResNet-50 on ImageNet</span></div>
+  </div>
+  <p><span class="hl">Image search</span> is just "find the image nearest this text." <span class="hl">Text-to-image generation</span> — the DALL-E and Stable Diffusion wave — leaned on CLIP's space to steer pictures toward a prompt's meaning. And the <span class="hl-gold">vision encoders inside modern multimodal LLMs</span> — the part that lets a chatbot look at a photo — are very often a CLIP or its descendant, SigLIP. But be honest about the limits too. CLIP inherits the internet's biases along with its knowledge; it's weak at fine-grained detail, counting, and abstract reasoning; and researchers have found a curious "modality gap" — even in the shared space, images and text still cluster in somewhat separate regions rather than perfectly overlapping.</p>
+  <figure>
+    <img src="figures/fig6.png" alt="A row showing text-to-image generation, image search, multimodal LLM vision encoders, and open-vocabulary detection all built on CLIP's shared space, plus a wins/catch two-column honest read.">
+    <figcaption><span class="fig-label">Fig 6</span> CLIP's shared space became the quiet foundation of image generation, search, and multimodal models — powerful, but it carries the web's biases and blind spots.</figcaption>
+  </figure>
+  <div class="verdict-table">
+    <div class="row head">
+      <div class="cell">Property</div>
+      <div class="cell">Traditional vision model</div>
+      <div class="cell">CLIP</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Learns from</strong></div>
+      <div class="cell">A fixed set of hand-labeled images</div>
+      <div class="cell">400M raw image-caption pairs</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>Can recognise</strong></div>
+      <div class="cell">Only its training categories</div>
+      <div class="cell">Anything you can describe in words</div>
+    </div>
+    <div class="row">
+      <div class="cell"><strong>A new task</strong></div>
+      <div class="cell">Collect data and retrain</div>
+      <div class="cell">Just write the labels as text (zero-shot)</div>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Why this matters</h2>
+  <p class="drop">CLIP is one of those ideas whose influence is far larger than its fame. Most people have never heard of it, yet they use its descendants every day — every time an app searches images by description, every time a model generates a picture from a prompt, every time a chatbot describes a photo you send it. Under all of that is the same shared space, learned by pulling matches together and pushing mismatches apart.</p>
+  <p>And the lesson generalises beyond vision. The <span class="hl">contrastive recipe</span> — learn a shared space by contrasting what goes together with what doesn't — has since been applied to audio and text, video and text, code and language, even proteins. Whenever you want two different kinds of data to <em>understand</em> each other, this is the first tool people reach for.</p>
+  <p>So the idea to carry away is bigger than "CLIP connects images and text." It's that intelligence across modalities may come down to a <span class="hl-gold">shared space of meaning</span> — and that you can build one, cheaply and at scale, with nothing more than pairs of things that belong together and a rule as simple as <em>pull the matches close, push the rest away.</em></p>
+  <div class="marginalia">One concept, explained simply. If "CLIP" now reads to you as "images and captions trained to be neighbours in one shared space," the figures did their job.</div>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">Pull the matches close, push the rest away — and pictures and words end up living in the same space.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jul 1, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>

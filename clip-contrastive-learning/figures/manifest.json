@@ -1,0 +1,32 @@
+[
+  {
+    "id": "fig1",
+    "path": "fig1.png",
+    "ok": true
+  },
+  {
+    "id": "fig2",
+    "path": "fig2.png",
+    "ok": true
+  },
+  {
+    "id": "fig3",
+    "path": "fig3.png",
+    "ok": true
+  },
+  {
+    "id": "fig4",
+    "path": "fig4.png",
+    "ok": true
+  },
+  {
+    "id": "fig5",
+    "path": "fig5.png",
+    "ok": true
+  },
+  {
+    "id": "fig6",
+    "path": "fig6.png",
+    "ok": true
+  }
+]
