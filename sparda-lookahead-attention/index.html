@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SparDA: The Fourth Projection — A Visual Walkthrough</title>
+<meta name="description" content="NVIDIA's SparDA adds a fourth projection — the Forecast — that predicts which KV blocks the next layer will need, hiding CPU-to-GPU copies behind compute. 1.7x faster decode, 5.3x throughput, explained visually." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="SparDA: The Fourth Projection — Q, K, V… and Forecast" />
+<meta property="og:description" content="NVIDIA taught attention layers to order tomorrow's memory today. One extra projection predicts what the NEXT layer needs — so the slow CPU-to-GPU copy hides behind compute. 1.7x faster decode, 5.3x throughput." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/sparda-lookahead-attention/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/sparda-lookahead-attention/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="SparDA: The Fourth Projection — Q, K, V… and Forecast" />
+<meta name="twitter:description" content="NVIDIA taught attention layers to order tomorrow's memory today. One extra projection predicts what the NEXT layer needs — so the slow CPU-to-GPU copy hides behind compute. 1.7x faster decode, 5.3x throughput." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/sparda-lookahead-attention/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 20 — New research</span>
+    <span class="small-caps">Jul 14, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">NVIDIA teaches attention to order tomorrow's memory, today</p>
+  <h1 class="anim" style="animation-delay:.15s">The Fourth<br><em>Projection</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">Every attention layer computes Q, K, and V. A new NVIDIA paper, SparDA, adds a fourth — the <em>Forecast</em> — which predicts what the <em>next</em> layer will need to read. That one change hides the slowest copy in long-context inference behind useful work, and makes decoding up to 1.7× faster.</p>
+  <div class="hero-formula anim" style="animation-delay:.55s">
+    <span class="label">The one-line change</span>
+    <div class="eq">(<span class="same">Q</span>, <span class="same">K</span>, <span class="same">V</span>, <span class="var">F</span>) = φ<sub>l</sub>(X<sub>l</sub>) &nbsp;&nbsp;·&nbsp;&nbsp; <span class="var">F<sub>l</sub></span> → picks the KV blocks for layer <span class="var">l+1</span></div>
+  </div>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>At 100K+ tokens of context, the KV cache no longer fits on the GPU and moves to CPU RAM. Every layer then stalls, waiting for its memories to be copied back. SparDA — from NVIDIA, with MIT's Song Han — breaks the coupling that causes the stall: it stops letting the attention query decide what to fetch, and trains a tiny dedicated projection to decide one layer early.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">A memory that outgrows its home</a><span class="pg">the offload problem</span></li>
+    <li><span class="num">02</span><a href="#s2">How sparse attention chooses</a><span class="pg">blocks & top-k</span></li>
+    <li><span class="num">03</span><a href="#s3">Two problems, one root cause</a><span class="pg">Q drives selection</span></li>
+    <li><span class="num">04</span><a href="#s4">Q, K, V… and F</a><span class="pg">the Forecast</span></li>
+    <li><span class="num">05</span><a href="#s5">Hiding the copy</a><span class="pg">prefetch pipeline</span></li>
+    <li><span class="num">06</span><a href="#s6">The skinny indexer</a><span class="pg">one head, no softmax</span></li>
+    <li><span class="num">07</span><a href="#s7">Teaching the Forecast</a><span class="pg">33.5M params</span></li>
+    <li><span class="num">08</span><a href="#s8">The scoreboard</a><span class="pg">1.7× and 5.3×</span></li>
+    <li><span class="num">09</span><a href="#s9">Why this matters</a><span class="pg">what to watch</span></li>
+  </ol>
+</nav>
+
+<!-- ============== 01 ============== -->
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>A memory that outgrows its home</h2>
+  <p class="drop">Every token a language model generates leaves a trace behind: a key and a value, stored in the KV cache so future tokens can attend back to it. This cache is the model's working memory — and it grows with every single token, forever. At short contexts nobody notices. At 100K-plus tokens — the regime of agents, long documents, and extended reasoning chains — the KV cache becomes enormous, and it simply <span class="hl">stops fitting in GPU memory</span>.</p>
+  <p>The obvious fix is the one your laptop uses when RAM runs out: move the cold data somewhere bigger. Offload the KV cache to CPU RAM, which is plentiful and cheap, and copy back only the pieces you need, when you need them. Modern sparse attention makes this plausible, because each decoding step only actually reads a small, selected subset of the cache.</p>
+  <p>But there's a catch. The highway between CPU RAM and the GPU is the PCIe bus, and it is <em>slow</em> compared to GPU memory. In the standard design, a layer first decides which pieces of memory it needs, then requests them from the CPU, then <span class="hl">sits idle while the copy crawls across PCIe</span> — and this stall repeats at every layer, of every decoding step, of every token. The paper we're reading today, <a href="https://arxiv.org/abs/2606.04511" style="color:var(--accent)">SparDA</a> (NVIDIA, June 2026), is about making that stall disappear.</p>
+  <div class="marginalia">SparDA = <strong>Spar</strong>se <strong>D</strong>ecoupled <strong>A</strong>ttention. Authors: Yaosheng Fu, Guangxuan Xiao, Xin Dong, Song Han, and Oreste Villa — an NVIDIA team together with MIT's Song Han (of SmoothQuant, StreamingLLM and QUEST fame).</div>
+</section>
+
+<!-- ============== 02 ============== -->
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>How sparse attention chooses</h2>
+  <p class="drop">Before we get to the trick, we need thirty seconds on how modern block-sparse attention works, because SparDA modifies exactly one piece of it. Instead of attending to every cached token, the cache is carved into <span class="hl-gold">blocks of 64 tokens</span>. For each new query, the model attends to three groups of blocks:</p>
+  <div class="formula">attend to = <em>initial blocks</em> ∪ <em>local window</em> ∪ <em>top-k selected blocks</em></div>
+  <p>The initial blocks (the "attention sink" at the start of the sequence) and the local window (the most recent tokens) are always included — no decision needed. The interesting part is the third group: a <span class="hl">top-k selection</span> over everything else. The model scores every candidate block for relevance to the current query, keeps the best k, and attends only to those. This is the recipe behind InfLLM-V2, NSA, MoBA and friends — and it cuts attention cost from "read everything" to "read ~96 blocks."</p>
+  <p>How does the scoring work? Each block is summarized by mean-pooling its keys into compressed representations. Then — and this detail is the villain of our story — <span class="hl">the attention query itself scores the blocks</span>. In grouped-query attention (GQA), every query head in a group scores every candidate block, each head's scores go through a softmax, and the results are summed across the group before the top-k is taken. A lot of machinery, all to make one shortlist.</p>
+  <div class="marginalia">SparDA builds on InfLLM-V2 (the sparse backbone of MiniCPM4.1-8B). Block size 64, one initial block, a local window of 1K–2K tokens, and a total budget of 96 blocks per query.</div>
+</section>
+
+<!-- ============== 03 ============== -->
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>Two problems, one root cause</h2>
+  <p class="drop">With the cache offloaded to CPU RAM, decoding hits two separate walls. <strong>Problem one: the stall.</strong> Because the query produces the shortlist, and the query only exists once its layer is already running, the copy from CPU can only start <em>after</em> selection — which means the GPU waits for PCIe at every single layer. The transfer is on the critical path, and nothing overlaps with it.</p>
+  <p><strong>Problem two: the selection tax.</strong> During decode there is only <em>one</em> query token per step, so the sparse attention itself is cheap. The expensive part is now the <em>deciding</em>: scoring every candidate block with every query head, softmaxing, summing. That cost grows linearly with context length — the paper measures that by 128K context, <span class="hl">block selection rivals the attention computation itself</span>, and during decode it becomes the dominant cost.</p>
+  <figure>
+    <img src="figures/fig2-two-problems.png" alt="The two problems: PCIe stall at every layer, and block selection cost growing with context length">
+    <figcaption><span class="fig-label">Fig 1</span> The two walls of offloaded sparse decoding. Left: every layer waits for its KV blocks to cross PCIe. Right: the shortlist itself is expensive — every query head scores every block, every step.</figcaption>
+  </figure>
+  <p>Here is the observation that makes the paper: <span class="hl-gold">both problems trace back to the same design choice</span> — the attention query Q drives block selection. Q arrives too late for prefetching, and Q drags its multi-head layout into a job that needs neither multiple heads nor a softmax. Decouple selection from Q, and both walls fall at once.</p>
+</section>
+
+<!-- ============== 04 ============== -->
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Q, K, V… and F</h2>
+  <p class="drop">SparDA's entire architectural change fits in one line. Where every transformer layer computes three projections from its hidden state, a SparDA layer computes four:</p>
+  <div class="formula">(Q<sub>l</sub>, K<sub>l</sub>, V<sub>l</sub>, <em>F<sub>l</sub></em>) = φ<sub>l</sub>(X<sub>l</sub>)</div>
+  <p>The newcomer, <strong>F</strong> — the <em>Forecast</em> — has one job: predict which KV blocks <span class="hl">the next layer</span> will want. Concretely, the Forecast produced in layer <em>l</em> is scored against layer <em>l+1</em>'s compressed keys, and the top-k winners become layer <em>l+1</em>'s block shortlist. Layer <em>l+1</em>'s own query Q then performs sparse attention over that pre-made shortlist — Q never does selection again.</p>
+  <div class="formula">shortlist(l+1) = initial ∪ local ∪ top-k(<em>F<sub>l</sub></em> · K̃<sub>l+1</sub><sup>T</sup>)</div>
+  <figure>
+    <img src="figures/fig1-fourth-projection.png" alt="Baseline layer where Q drives both selection and attention, versus SparDA layer where the Forecast selects for the next layer">
+    <figcaption><span class="fig-label">Fig 2</span> The one-line change. Left: Q drives both selection and attention, inside the same layer. Right: a fourth projection F exits the layer and picks blocks for the layer above; Q keeps only the attention job.</figcaption>
+  </figure>
+  <p>Two boundary cases, handled simply: the first layer has no predecessor, so it gets a small extra projection that forecasts for <em>itself</em> (its KV also stays on GPU permanently), and the final layer's Forecast is simply unused. Everything else in the model — every weight of the attention and FFN — is untouched.</p>
+  <p>If this "decoupled indexer" idea sounds familiar, it should: <span class="hl-violet">DeepSeek's DSA</span> (the sparse attention in DeepSeek-V3.2) already separates its "lightning indexer" from the attention query, at the token level. SparDA takes that idea to block level — and adds the piece DSA doesn't have: the indexer runs <em>one layer ahead</em>, which is exactly what unlocks prefetching.</p>
+  <div class="pull-quote">Sparse selection stops being a computation you wait for, and becomes a schedule you can act on early.</div>
+</section>
+
+<!-- ============== 05 ============== -->
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Hiding the copy</h2>
+  <p class="drop">Now the stall problem dissolves. While layer <em>l</em> is still crunching its attention and FFN, its Forecast has <em>already announced</em> which KV blocks layer <em>l+1</em> will read. So the runtime starts copying those blocks from CPU RAM immediately — on a <span class="hl">separate CUDA stream</span>, in parallel with layer <em>l</em>'s compute. By the time layer <em>l+1</em> begins, its memories are already sitting in GPU memory. The PCIe transfer still happens; it just happens <em>behind</em> useful work instead of in front of it.</p>
+  <figure>
+    <img src="figures/fig3-prefetch-overlap.png" alt="Timeline showing copies serializing with compute without lookahead, versus overlapping with compute in SparDA">
+    <figcaption><span class="fig-label">Fig 3</span> The payoff of knowing one layer early. Top: select → copy → compute, serialized, with the GPU idling in every gap. Bottom: a dedicated prefetch stream copies layer l+1's blocks under layer l's compute — the gaps vanish.</figcaption>
+  </figure>
+  <p>The engineering behind this is lovely in its own right. Naïve prefetching would issue thousands of small, scattered memory copies — death by launch overhead. SparDA instead runs a <span class="hl-gold">persistent Triton kernel</span> using Unified Virtual Addressing (UVA): a small, fixed squad of GPU thread blocks stays resident and continuously drains a queue of block-transfer tasks within a single launch. The squad size is tuned to batch size — at small batches the GPU is underutilized and a few thread blocks suffice; at large batches, transfer volume grows and the squad expands, deliberately trading a sliver of compute for keeping PCIe saturated.</p>
+  <p>An earlier system, InfiniGen (OSDI 2024), tried lookahead prefetching without training: it reused the raw hidden state as a proxy for the next layer's attention. The gamble is that adjacent layers look at similar things — and when that assumption breaks, accuracy breaks with it. SparDA's answer: don't guess from a proxy. <span class="hl">Train a projection to make the prediction properly.</span></p>
+</section>
+
+<!-- ============== 06 ============== -->
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>The skinny indexer</h2>
+  <p class="drop">The second problem — the selection tax — falls to a quieter observation. The old selector was built from query heads, so it inherited their layout: in an 8B GQA model, that's several query heads per group, each scoring every block, each needing a softmax, then a cross-head sum. But none of that structure is <em>required</em> for making a shortlist. It was only there because Q happened to be the thing doing the scoring.</p>
+  <p>Once the Forecast is its own projection, it can be shaped for its actual job: <span class="hl">one Forecast head per GQA group</span> — one per KV head — instead of one per query head. The per-query-head scoring loop disappears. And because there is no longer a group of heads whose scores must be summed, <span class="hl">the softmax is skipped entirely</span>; raw scores go straight to top-k.</p>
+  <figure>
+    <img src="figures/fig4-skinny-indexer.png" alt="Baseline multi-head selector with softmax versus SparDA's single forecast head per GQA group with no softmax">
+    <figcaption><span class="fig-label">Fig 4</span> Selection sheds the query's layout. Left: 8 scoring passes, per-head softmax, cross-head sum — every step. Right: one skinny Forecast head per group, no softmax, straight to top-k.</figcaption>
+  </figure>
+  <p>The measured effect: block-selection cost drops by up to <strong>2.5×</strong> at 128K context during prefill, and during decode the selection time goes <span class="hl-green">nearly flat as context grows</span> — where the baseline's selection kept climbing and dominated the step. This is why SparDA speeds up prefill too (up to 1.25×), even though prefill has no offloading to hide: the skinny indexer is simply cheaper everywhere.</p>
+</section>
+
+<!-- ============== 07 ============== -->
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Teaching the Forecast</h2>
+  <p class="drop">How do you train a projection to predict another layer's decisions? By distillation. The original query-driven selector — the machinery being replaced — becomes the <em>teacher</em>. For every position, the teacher's block-attention scores form a probability distribution over blocks: "here is where attention actually wanted to look." The Forecast is trained to reproduce that distribution <span class="hl">one layer in advance</span>, using a KL-divergence loss.</p>
+  <p>Two thoughtful details make the student sharp. First, the loss isn't computed over all thousands of blocks — the teacher's top-k blocks are kept individually, and all remaining probability mass is folded into a single <em>rest bucket</em>. The student focuses on ranking the blocks that matter while still being penalized for leaking mass outside the set. Second, the teacher's targets are built with much finer-grained pooling (kernel 2, stride 1) than the student uses at inference (kernel 32, stride 16) — a higher-resolution supervision signal that the paper's ablations show produces a measurably better indexer.</p>
+  <figure>
+    <img src="figures/fig5-training-forecast.png" alt="Distillation setup: frozen 8B backbone, trained 33.5M forecast parameters, KL loss between teacher selector distribution and forecast scores">
+    <figcaption><span class="fig-label">Fig 5</span> The Forecast learns to imitate tomorrow's selector. The 8B backbone stays frozen; only the Forecast projections (33.5M parameters, 0.41%) train, matching the original selector's block distribution via KL divergence.</figcaption>
+  </figure>
+  <p>And here is the practical beauty: <span class="hl-gold">the backbone stays completely frozen</span>. Only the Forecast projections train — 33.5M parameters on an 8B model, 0.41% of the total — for just 2,000 optimizer steps on long-context data. SparDA is not a new model; it's a <em>bolt-on</em> for models that already use block-sparse attention. No retraining, no accuracy roulette on the base weights.</p>
+</section>
+
+<!-- ============== 08 ============== -->
+<section id="s8">
+  <span class="section-num">08</span>
+  <h2>The scoreboard</h2>
+  <p class="drop">The team grafted SparDA onto two sparse-pretrained 8B models — MiniCPM4.1-8B and NOSA-8B — and measured both quality and speed on an H100. Quality first, because a speedup that costs accuracy is a trade, not a win. Across HELMET, LongBench, RULER and a long-reasoning suite (MATH-500, AIME), SparDA <span class="hl-green">matches or beats the sparse baseline it replaces</span>: +0.3 average on MiniCPM4.1-8B, +2.3 on NOSA-8B — with a striking <strong>+6.5</strong> on long reasoning. And the advantage <em>widens</em> with context: on RULER, SparDA's lead over the baseline grows from +1.7 at 32K to +4.3 at 128K. The trained Forecast generalizes better than the training-free selector it imitated. (InfiniGen's proxy approach, tested head-to-head, loses several points everywhere — guessing is not a substitute for learning.)</p>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">1.7×</span><span class="lbl">faster decode vs sparse offload</span></div>
+    <div class="stat"><span class="num">1.25×</span><span class="lbl">faster prefill</span></div>
+    <div class="stat"><span class="num">5.3×</span><span class="lbl">decode throughput vs non-offload</span></div>
+    <div class="stat"><span class="num">+6.5</span><span class="lbl">long reasoning, NOSA-8B</span></div>
+    <div class="stat"><span class="num">0.41%</span><span class="lbl">added parameters</span></div>
+  </div>
+  <p>Now speed. Against the same sparse model with offloading — the honest baseline — SparDA decodes up to <strong>1.7× faster</strong> at 128K, from the hidden prefetch plus the cheaper selection. But the headline number comes from a different comparison. Keeping the cache <em>on</em> the GPU (no offloading) means long contexts devour memory: at 128K, the non-offload sparse baseline runs out of memory beyond batch size 4. SparDA parks the cache in CPU RAM, pays nothing for it thanks to prefetch, and spends the freed GPU memory on <span class="hl">batch size 64</span> — pushing decode throughput to <strong>5.3×</strong> the non-offload sparse baseline, and 9.2× dense attention.</p>
+  <figure>
+    <img src="figures/fig6-scoreboard.png" alt="Results scoreboard: accuracy maintained or improved, 1.25x prefill and 1.7x decode speedups, 5.3x throughput from larger batches">
+    <figcaption><span class="fig-label">Fig 6</span> The full scoreboard. Accuracy holds or improves; decode gets 1.7× faster; and the freed GPU memory converts directly into batch size — the biggest win of all.</figcaption>
+  </figure>
+  <p>That last mechanism deserves a highlight, because it reframes what offloading is <em>for</em>. Offloading was a compromise you accepted when memory ran out. With the copy fully hidden, it becomes <span class="hl-gold">a strategy you choose</span>: evacuate the cache to CPU, and turn GPU memory into throughput.</p>
+</section>
+
+<!-- ============== 09 ============== -->
+<section id="s9">
+  <span class="section-num">09</span>
+  <h2>Why this matters</h2>
+  <p class="drop">The deepest idea in SparDA isn't the speedup — it's the reframing. Sparse selection used to be an <em>operation</em>: something computed inside a layer, tied to that layer's query, finished just in time to be used. SparDA turns it into a <em>signal</em>: something predicted early, cheap to produce, and — crucially — <span class="hl">visible to the serving system before it's needed</span>. Once the runtime knows the future access pattern, an entire toolbox of systems tricks opens up, of which CPU prefetching is only the first.</p>
+  <div class="verdict-table">
+    <div class="row head"><div class="cell">Approach</div><div class="cell">How it selects</div><div class="cell">The catch</div></div>
+    <div class="row"><div class="cell"><strong>InfiniGen</strong> (2024)</div><div class="cell">Reuses the raw hidden state as a proxy for the next layer — training-free lookahead</div><div class="cell">Accuracy drops sharply when adjacent layers diverge; CPU-side gather becomes the bottleneck</div></div>
+    <div class="row"><div class="cell"><strong>DeepSeek DSA</strong> (V3.2)</div><div class="cell">Trained "lightning indexer," decoupled from the query — token level, same layer</div><div class="cell">No lookahead: selection still finishes inside the layer that needs it, so nothing can prefetch</div></div>
+    <div class="row"><div class="cell"><strong>SparDA</strong> (2026)</div><div class="cell">Trained Forecast projection — block level, <em>one layer ahead</em>, co-designed with a prefetch kernel</div><div class="cell">An add-on: inherits whatever accuracy ceiling the base sparse method has</div></div>
+  </div>
+  <p>The authors are candid about the limits: SparDA doesn't make attention sparser or smarter — it makes an existing sparse method <em>schedulable</em>, and its accuracy is bounded by that base method. But the principle travels. The paper explicitly sketches the same lookahead applied to token-level DSA — the sparse attention inside DeepSeek-V3.2, GLM-5, and DeepSeek-V4's compressed-attention stack. If frontier labs adopt forecast-style indexers, the KV cache's permanent residence may quietly move from the GPU to CPU RAM, with nobody noticing except the throughput dashboard.</p>
+  <p>And that's the pattern worth watching across inference research right now: the wall between <em>model architecture</em> and <em>serving system</em> is dissolving. SparDA is a projection trained with a KL loss — pure ML — whose entire purpose is to feed a CUDA prefetch stream — pure systems. The best inference work of 2026 lives exactly on that seam.</p>
+  <p style="margin-top:2.5rem"><span class="small-caps">Read the paper</span><br><a href="https://arxiv.org/abs/2606.04511" style="color:var(--accent)">SparDA: Sparse Decoupled Attention for Efficient Long-Context LLM Inference</a> — Fu, Xiao, Dong, Han, Villa (NVIDIA, 2026). Code: <a href="https://github.com/NVlabs/SparDA" style="color:var(--accent)">github.com/NVlabs/SparDA</a></p>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">Ask not what your layer can fetch for you — ask what your layer can fetch for the next one.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jul 14, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>

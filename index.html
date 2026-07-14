@@ -103,6 +103,12 @@
     <div class="list-head">The archive</div>
 
     <!-- ARTICLES:START — newest first; the skill prepends new entries here -->
+    <a class="article-row" href="sparda-lookahead-attention/">
+      <div class="meta"><span>Jul 14, 2026</span><span class="tag">new research</span><span class="tag">inference</span></div>
+      <h2>The Fourth Projection — SparDA's Lookahead Sparse Attention</h2>
+      <p>Every attention layer computes Q, K, and V. NVIDIA's SparDA adds a fourth — the Forecast — which predicts which KV-cache blocks the NEXT layer will need. Selection stops waiting for the query, the CPU-to-GPU copy hides behind compute, and the shortlist-maker shrinks to one skinny head with no softmax. A visual tour of the architecture, the prefetch pipeline, and the 33.5M-parameter distillation trick that makes decoding 1.7× faster — and throughput 5.3× higher.</p>
+      <span class="go">Read the visual walkthrough →</span>
+    </a>
     <a class="article-row" href="clip-contrastive-learning/">
       <div class="meta"><span>Jul 1, 2026</span><span class="tag">multimodal</span><span class="tag">vision + language</span></div>
       <h2>Pull Together, Push Apart — CLIP &amp; Contrastive Learning</h2>
