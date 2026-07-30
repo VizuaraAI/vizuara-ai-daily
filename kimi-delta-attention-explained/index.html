@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Write Only the Surprise: Inside Kimi K3's Delta Attention — Vizuara AI Daily</title>
+<meta name="description" content="How Moonshot AI's Kimi K3 reads a million tokens without quadratic cost — the delta rule, channel-wise gating, and the hybrid attention stack behind it, explained from scratch." />
+<link rel="icon" type="image/png" href="../assets/logo.png" />
+<!-- Open Graph / link-preview (WhatsApp, X, LinkedIn). URLs MUST be absolute. -->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Vizuara AI Daily" />
+<meta property="og:title" content="Write Only the Surprise: Inside Kimi K3's Delta Attention" />
+<meta property="og:description" content="Kimi K3 reads a million tokens without the usual quadratic bill. Here's the delta rule, channel-wise gating, and hybrid attention stack that make it possible — explained from scratch." />
+<meta property="og:url" content="https://vizuaraai.github.io/vizuara-ai-daily/kimi-delta-attention-explained/" />
+<meta property="og:image" content="https://vizuaraai.github.io/vizuara-ai-daily/kimi-delta-attention-explained/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Write Only the Surprise: Inside Kimi K3's Delta Attention" />
+<meta name="twitter:description" content="Kimi K3 reads a million tokens without the usual quadratic bill. Here's the delta rule, channel-wise gating, and hybrid attention stack that make it possible — explained from scratch." />
+<meta name="twitter:image" content="https://vizuaraai.github.io/vizuara-ai-daily/kimi-delta-attention-explained/og-card.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #f4ecd8;
+    --paper-deep:   #ebe1c7;
+    --ink:          #1a1815;
+    --ink-soft:     #3d3833;
+    --ink-faint:    #6b6359;
+    --rule:         #2a2622;
+    --accent:       #c8351b;
+    --accent-soft:  #e08a76;
+    --gold:         #b8862f;
+    --teal:         #2f5e5a;
+    --blue:         #2e4a7b;
+    --green:        #4a6b3a;
+    --violet:       #72569a;
+    --hot:          #c8351b;
+    --cool:         #2e4a7b;
+    --margin:       max(2rem, calc(50vw - 38rem));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Fraunces', 'Times New Roman', serif;
+    font-feature-settings: "ss01" on, "ss02" on, "onum" on;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 18px;
+    overflow-x: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(120,90,40,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(60,40,20,0.035) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 0.18 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+  main { position: relative; z-index: 2; }
+
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-weight: 500;
+  }
+  h2 { font-size: clamp(2.2rem, 5vw, 3.6rem); margin-bottom: 1.5rem; font-weight: 400; }
+  h3 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 2.5rem 0 1rem; font-weight: 500; }
+  h4 { font-size: 1.25rem; margin: 1.5rem 0 0.6rem; font-weight: 600; font-variation-settings: "opsz" 14; }
+
+  p { font-size: 1.125rem; margin-bottom: 1.25rem; max-width: 65ch; }
+  p.lede {
+    font-size: 1.45rem; line-height: 1.5; color: var(--ink-soft);
+    font-style: italic; font-weight: 300; max-width: 60ch;
+  }
+  .small-caps {
+    font-family: 'Inter Tight', sans-serif; text-transform: uppercase;
+    letter-spacing: 0.18em; font-size: 0.72rem; font-weight: 600; color: var(--ink-faint);
+  }
+  .drop::first-letter {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 4.5rem;
+    float: left; line-height: 0.85; margin: 0.4rem 0.5rem 0 0; color: var(--accent);
+  }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9em;
+    background: rgba(40,30,20,0.06); padding: 0.1em 0.35em; border-radius: 3px; color: var(--ink);
+  }
+  section {
+    padding: 6rem var(--margin); position: relative;
+    border-bottom: 1px solid rgba(40,30,20,0.08);
+  }
+  section:last-child { border-bottom: none; }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; letter-spacing: 0.05em;
+    color: var(--accent); margin-bottom: 1rem; display: inline-block;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--accent); border-radius: 2px;
+  }
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 4rem var(--margin) 2rem; position: relative; overflow: hidden;
+  }
+  .hero-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid var(--ink); padding-bottom: 0.75rem; margin-bottom: 3rem;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .hero-meta .vol { font-family: 'Fraunces', serif; font-style: italic; font-size: 1rem; color: var(--ink-soft); }
+  .hero h1 {
+    font-size: clamp(3rem, 9.5vw, 8rem); font-weight: 300; line-height: 0.92;
+    margin: 1rem 0 2rem; font-variation-settings: "opsz" 144, "wght" 300;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); font-variation-settings: "opsz" 144, "wght" 400; }
+  .hero-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem;
+    border-top: 1px solid rgba(40,30,20,0.2); padding-top: 1.5rem;
+  }
+  .hero-sub p { font-size: 1rem; color: var(--ink-soft); }
+  .hero-formula {
+    margin: 2rem 0; padding: 2rem; background: var(--ink); color: var(--paper);
+    font-family: 'JetBrains Mono', monospace; text-align: center; border-radius: 2px; position: relative;
+  }
+  .hero-formula .label {
+    position: absolute; top: -0.7rem; left: 1rem; background: var(--paper); color: var(--ink);
+    padding: 0 0.5rem; font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .hero-formula .eq { font-size: 1.4rem; letter-spacing: 0.05em; line-height: 1.5; }
+  .hero-formula .eq .var { color: var(--accent-soft); }
+  .hero-formula .eq .same { color: #9bd1a8; }
+  .toc {
+    background: var(--paper-deep); padding: 4rem var(--margin);
+    border-top: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15);
+  }
+  .toc h2 {
+    font-size: 1.2rem; font-family: 'Inter Tight', sans-serif; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2rem; font-weight: 600;
+  }
+  .toc-list { list-style: none; }
+  .toc-list li {
+    border-top: 1px solid rgba(40,30,20,0.15); padding: 1rem 0;
+    display: flex; align-items: baseline; gap: 1.5rem;
+  }
+  .toc-list li:last-child { border-bottom: 1px solid rgba(40,30,20,0.15); }
+  .toc-list .num { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent); width: 3rem; flex-shrink: 0; }
+  .toc-list a {
+    color: var(--ink); text-decoration: none; font-family: 'Fraunces', serif;
+    font-size: 1.4rem; flex-grow: 1; transition: color 0.2s;
+  }
+  .toc-list a:hover { color: var(--accent); font-style: italic; }
+  .toc-list .pg { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--ink-faint); }
+
+  figure { margin: 3rem auto; padding: 0; text-align: center; max-width: 100%; }
+  figure img, figure svg {
+    max-width: 100%; height: auto; display: block; margin: 0 auto;
+    background: var(--paper); border-radius: 4px;
+    box-shadow: 0 2px 24px rgba(40,30,20,0.12); border: 1px solid rgba(40,30,20,0.10);
+  }
+  figcaption {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    margin-top: 1rem; line-height: 1.4; max-width: 56ch; margin-left: auto; margin-right: auto; text-align: center;
+  }
+  figcaption .fig-label {
+    font-weight: 700; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 0.72rem; margin-right: 0.5rem;
+  }
+  .pull-quote {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem); line-height: 1.25; color: var(--ink);
+    margin: 4rem auto; padding: 2.5rem 0; max-width: 50ch; text-align: center;
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); position: relative;
+  }
+  .pull-quote::before {
+    content: '"'; position: absolute; top: -1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--paper); padding: 0 1rem; font-size: 4rem; color: var(--accent);
+    line-height: 1; font-style: normal;
+  }
+  .marginalia {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.85rem; color: var(--ink-faint);
+    line-height: 1.4; border-left: 2px solid var(--accent); padding-left: 1rem; margin: 1.5rem 0; font-style: italic;
+  }
+  .formula {
+    background: var(--paper-deep); border: 1px solid rgba(40,30,20,0.15); padding: 1.5rem 2rem;
+    margin: 2rem 0; text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem; border-radius: 3px; overflow-x: auto;
+  }
+  .formula em { color: var(--accent); font-style: normal; font-weight: 700; }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+    margin: 2.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
+  }
+  .stat { padding: 1.5rem; border-right: 1px solid rgba(40,30,20,0.15); text-align: center; }
+  .stat:last-child { border-right: none; }
+  .stat .num {
+    font-family: 'Fraunces', serif; font-variation-settings: "opsz" 144, "wght" 400;
+    font-size: 2.6rem; color: var(--accent); line-height: 1; display: block;
+  }
+  .stat .lbl {
+    font-family: 'Inter Tight', sans-serif; font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-faint); margin-top: 0.5rem; display: block;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin: 2rem 0; }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-sub { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat { border-right: 1px solid rgba(40,30,20,0.15); border-bottom: 1px solid rgba(40,30,20,0.15); }
+  }
+  .verdict-table {
+    margin: 3rem 0; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden;
+    font-family: 'Inter Tight', sans-serif; font-size: 0.95rem;
+  }
+  .verdict-table .row { display: grid; grid-template-columns: 1.4fr 1.5fr 1.5fr; border-bottom: 1px solid rgba(40,30,20,0.12); }
+  .verdict-table .row:last-child { border-bottom: none; }
+  .verdict-table .row.head {
+    background: var(--ink); color: var(--paper); font-weight: 600;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .verdict-table .cell { padding: 1rem 1.2rem; border-right: 1px solid rgba(40,30,20,0.1); line-height: 1.4; }
+  .verdict-table .cell:last-child { border-right: none; }
+  .verdict-table .row .cell strong { font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 1.1rem; color: var(--ink); }
+  @media (max-width: 768px) {
+    .verdict-table .row { grid-template-columns: 1fr; }
+    .verdict-table .cell { border-right: none; border-bottom: 1px solid rgba(40,30,20,0.06); }
+  }
+  .ornament { text-align: center; margin: 3rem 0; color: var(--ink-faint); font-size: 1.5rem; letter-spacing: 1rem; }
+  .hl { background: linear-gradient(180deg, transparent 60%, rgba(200,53,27,0.25) 60%); padding: 0 0.1em; }
+  .hl-gold { background: linear-gradient(180deg, transparent 60%, rgba(184,134,47,0.3) 60%); padding: 0 0.1em; }
+  .hl-green { background: linear-gradient(180deg, transparent 60%, rgba(74,107,58,0.3) 60%); padding: 0 0.1em; }
+  .hl-violet { background: linear-gradient(180deg, transparent 60%, rgba(114,86,154,0.32) 60%); padding: 0 0.1em; }
+  footer { padding: 4rem var(--margin) 3rem; background: var(--ink); color: var(--paper); text-align: center; }
+  footer p { color: var(--paper); margin: 0 auto 0.5rem; max-width: none; }
+  footer .small-caps { color: var(--accent-soft); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.8s ease-out backwards; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+  <div class="hero-meta">
+    <span class="small-caps" style="display:flex;align-items:center;gap:0.6rem"><img src="../assets/logo.png" alt="Vizuara AI Daily" style="width:28px;height:28px;border-radius:7px"> Vizuara · AI Daily</span>
+    <span class="vol">No. 21 — Attention architecture</span>
+    <span class="small-caps">Jul 30, 2026</span>
+  </div>
+  <p class="small-caps anim" style="animation-delay:.05s">Moonshot AI's newest open model reads a million tokens without the usual quadratic bill</p>
+  <h1 class="anim" style="animation-delay:.15s">Write only<br><em>the surprise</em></h1>
+  <p class="lede anim" style="animation-delay:.35s">Every extra token you feed a Transformer costs more than the one before it — attention's bill grows with the square of the length. Kimi K3, the 2.8-trillion-parameter open-weight model Moonshot AI released this month, reads a million tokens anyway. It doesn't remember everything it has seen. It keeps a small notebook, and writes down only what surprised it.</p>
+  <div class="hero-sub anim" style="animation-delay:.75s">
+    <p>Moonshot AI, July 2026. Kimi K3 pairs a linear-attention mechanism called Kimi Delta Attention — built on the delta rule, an idea borrowed from classical recurrent learning — with a sparse mixture-of-experts backbone and a new cross-layer routing trick called Attention Residuals. Moonshot reports roughly <em>2.5x</em> the scaling efficiency of its predecessor, Kimi K2, at comparable compute.</p>
+    <p style="text-align:right">Scroll to begin.<br><span style="font-size:1.5rem">↓</span></p>
+  </div>
+</section>
+
+<!-- ============== TOC ============== -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li><span class="num">01</span><a href="#s1">The wall every long-context model hits</a></li>
+    <li><span class="num">02</span><a href="#s2">From a library to a notebook</a></li>
+    <li><span class="num">03</span><a href="#s3">Write only what surprised you</a></li>
+    <li><span class="num">04</span><a href="#s4">Not every memory should fade at the same rate</a></li>
+    <li><span class="num">05</span><a href="#s5">Mostly cheap, occasionally exact</a></li>
+    <li><span class="num">06</span><a href="#s6">What the redesign buys you</a></li>
+    <li><span class="num">07</span><a href="#s7">Why this matters</a></li>
+  </ol>
+</nav>
+
+<!-- ============== BODY SECTIONS ==============
+     Repeat <section> blocks. Each section:
+       <section id="s1">
+         <span class="section-num">01</span>
+         <h2>Section title</h2>
+         <p class="drop">First paragraph (drop cap on first letter)...</p>
+         <p>More paragraphs. Use <span class="hl">highlight</span>, <code>code</code>,
+            <span class="marginalia">side notes</span>, <div class="formula">equations</div>.</p>
+
+         FIGURE (PaperBanana PNG — figures sit beside this index.html in figures/):
+         <figure>
+           <img src="figures/fig1-overview.png" alt="...">
+           <figcaption><span class="fig-label">Fig 1</span> Caption explaining the figure.</figcaption>
+         </figure>
+
+         Optional: <div class="pull-quote">A memorable line.</div>
+         Optional: <div class="stat-grid"><div class="stat"><span class="num">90%</span><span class="lbl">label</span></div>...</div>
+         Optional: <div class="verdict-table">...</div>
+       </section>
+============================================== -->
+<section id="s1">
+  <span class="section-num">01</span>
+  <h2>The wall every long-context model hits</h2>
+  <p class="drop">Feed a standard Transformer a thousand extra tokens and it does a thousand extra units of work. Feed it a million, and the work doesn't scale by a million — it scales by roughly a million squared, because every one of those tokens has to be compared against every other token to compute attention. Doubling the context doesn't double the cost. It quadruples it.</p>
+  <p>That arithmetic is why "long context" has been one of the hardest problems in language models, and why most systems quietly cap out well short of a million tokens. The attention matrix itself becomes enormous, and alongside it the model has to keep a running cache of every key and value it has ever produced — the <span class="hl">KV cache</span> — which grows in lockstep with the conversation. Neither cost is optional in standard attention. It's the mechanism working exactly as designed.</p>
+  <figure>
+    <img src="figures/fig1-quadratic-wall.png" alt="Diagram showing the n-by-n attention matrix growing enormous from 1K to 1M tokens, the KV cache growing without bound, and a chart of compute cost curving steeply upward with sequence length.">
+    <figcaption><span class="fig-label">Fig 1</span> Standard attention's cost curves upward with the square of the sequence length — a growing conversation becomes an unaffordable one.</figcaption>
+  </figure>
+  <p>Kimi K3 gets to a million tokens by not accepting that trade. Its attention layers mostly don't compare every token to every other token at all. To see how, it helps to start from the equation for attention itself and ask what happens if you strip away one particular piece of it.</p>
+</section>
+
+<section id="s2">
+  <span class="section-num">02</span>
+  <h2>From a library to a notebook</h2>
+  <p class="drop">Standard attention uses softmax to turn similarity scores into weights before mixing values together. Remove that normalization step — a move researchers have tried since at least 2020 — and the algebra rearranges into something surprising: everything a token needs to know about the past can be collected into a single matrix of fixed size, updated one token at a time.</p>
+  <p>Think of the difference as a library versus a notebook. Ordinary attention behaves like a library: every book — every past token — stays on the shelf, and answering a query means walking past all of them. A model built this way can answer with total precision, because nothing is ever thrown away, but the library only gets bigger, and slower to search, the longer the conversation runs.</p>
+  <p><span class="hl">Linear attention</span> behaves like a notebook instead. Each new token's key and value get folded into one running state — mathematically, an outer product added into a matrix — and a query simply reads from that state:</p>
+  <div class="formula">S<sub>t</sub> = S<sub>t-1</sub> + <em>|v<sub>t</sub>⟩⟨k<sub>t</sub>|</em></div>
+  <figure>
+    <img src="figures/fig2-fixed-memory-state.png" alt="Two panels contrasting a cluttered library of every past token kept simultaneously versus a single fixed-size notebook state that absorbs a stream of incoming tokens one at a time.">
+    <figcaption><span class="fig-label">Fig 2</span> Linear attention collapses history into one fixed-size state — a notebook that never gets any bigger, however long the conversation runs.</figcaption>
+  </figure>
+  <p>That fixed size is exactly what makes a million-token context affordable: a thousand tokens and a million tokens cost the same to store. It's also, on its own, not good enough — because a notebook that just keeps writing on top of itself runs into a much older problem.</p>
+</section>
+
+<section id="s3">
+  <span class="section-num">03</span>
+  <h2>Write only what surprised you</h2>
+  <p class="drop">Here's the flaw in the simplest version of that notebook. If you write a value into the state under some key, and then a few tokens later write a different value under a similar key, the second write doesn't replace the first — it lands on top of it. Query the state afterward and you get a blur of both, because the update rule only ever adds. <span class="marginalia">This is the same failure mode that sank early-2020s linear attention research — the notebook filled up with overlapping scribbles and stopped being useful for anything precise.</span></p>
+  <p>The fix is called the <span class="hl-gold">delta rule</span>, and it's older than deep learning — it comes from classical work on error-driven learning. Before writing anything new, first ask the notebook what it currently thinks the value is. Query the existing state with the new key and get a prediction, v̂<sub>t</sub>. Then compare that prediction to the actual value, v<sub>t</sub>, and write only the difference:</p>
+  <div class="formula">e<sub>t</sub> = β<sub>t</sub> ( <em>|v<sub>t</sub>⟩</em> − <em>|v̂<sub>t</sub>⟩</em> )</div>
+  <figure>
+    <img src="figures/fig3-delta-rule-correction.png" alt="Comparison of naive linear attention where a new value blurs together with an old one, versus the delta rule's three-step process of predicting, computing the error, and writing only the correction.">
+    <figcaption><span class="fig-label">Fig 3</span> Predict, compare, correct. The delta rule writes only the gap between what the memory expected and what actually arrived.</figcaption>
+  </figure>
+  <p>β<sub>t</sub> is a learned "how hard should I correct this" dial between 0 and 1. Set it to 1 and the state's prediction is fully overwritten. Set it lower and the old prediction only moves partway toward the truth. Either way, the model isn't dumping new information onto the pile — it's correcting a specific error, the same way you'd revise one line in a notebook instead of rewriting the whole page.</p>
+  <div class="pull-quote">The memory doesn't need the whole value back. It only needs to know what it got wrong.</div>
+  <p>This delta-rule notebook is the architecture known as DeltaNet, and it's the direct ancestor of what Kimi K3 uses. But error-correction alone still leaves one thing unaddressed: old information that was never wrong, exactly, just no longer relevant.</p>
+</section>
+
+<section id="s4">
+  <span class="section-num">04</span>
+  <h2>Not every memory should fade at the same rate</h2>
+  <p class="drop">The next fix is forgetting on purpose. Gated DeltaNet, the architecture that came after plain DeltaNet, adds a single dial — a scalar α<sub>t</sub> between 0 and 1 — that shrinks the entire memory state a little before every delta-rule correction is written in. Turn α<sub>t</sub> down and the whole notebook fades faster, making room for the present. It's a clean idea, and it works. But it treats every part of the memory identically: one dial, applied uniformly, everywhere.</p>
+  <p>Kimi Delta Attention's contribution is to notice that a single dial is too blunt. Different pieces of information deserve different lifespans — a fact stated once early in a document might matter for the whole million-token read, while a formatting detail from three paragraphs ago can be dropped immediately. So KDA replaces the one scalar α<sub>t</sub> with a <span class="hl-violet">vector</span>, one decay value per feature channel:</p>
+  <div class="formula">S<sub>t</sub> = S<sub>t-1</sub> <em>D<sub>t</sub></em> (I − β<sub>t</sub>|k<sub>t</sub>⟩⟨k<sub>t</sub>|) + β<sub>t</sub>|v<sub>t</sub>⟩⟨k<sub>t</sub>|</div>
+  <figure>
+    <img src="figures/fig4-channel-wise-gating.png" alt="Contrast between Gated DeltaNet's single scalar dial fading an entire memory grid uniformly, versus Kimi Delta Attention's row of independent per-channel dials fading each column of the memory grid at its own rate.">
+    <figcaption><span class="fig-label">Fig 4</span> One dial for the whole memory versus one dial per channel — KDA lets each feature keep its own decay rate.</figcaption>
+  </figure>
+  <p><em>D<sub>t</sub></em> is a diagonal matrix built from that vector — mathematicians call the resulting update "diagonal-plus-low-rank." In plain terms: some channels of the memory can be told to forget almost instantly, while others are told to hold on, and the delta-rule correction still runs on top, targeted and precise. One state, many independent clocks. That's the whole idea behind the name — <em>delta</em> for writing only the correction, <em>gated</em> for controlled forgetting, and Kimi's specific twist, channel by channel, for letting the model decide dimension by dimension what's worth keeping.</p>
+</section>
+
+<section id="s5">
+  <span class="section-num">05</span>
+  <h2>Mostly cheap, occasionally exact</h2>
+  <p class="drop">A linear-attention model this efficient still gives something up: it can't always retrieve one exact fact from far back with perfect precision, the way full attention can, because everything is compressed through that fixed-size state. Moonshot's answer isn't to choose one mechanism over the other. It's to use both, in a fixed ratio, throughout the network.</p>
+  <p>Kimi K3's layers run three KDA layers for every one layer of full attention — specifically a compressed variant called MLA, multi-head latent attention, which handles the KV cache more cheaply than ordinary attention while still looking at every prior token exactly. Roughly three-quarters of the network runs the cheap linear notebook; one-quarter keeps the expensive library on hand for when precision actually matters. <span class="marginalia">This 3:1 pattern isn't unique to Kimi — Alibaba's Qwen3-Next uses the same ratio with a different linear-attention variant. It's becoming the working consensus for how to build long-context models without going all-in on linear attention, after at least one lab tried a fully-linear model and had to walk it back.</span></p>
+  <figure>
+    <img src="figures/fig5-hybrid-stack.png" alt="Vertical stack of transformer layers showing three lightweight KDA layers for every one full-attention MLA layer, with curved Attention Residual arrows letting a layer reach back to any earlier layer rather than just the one directly below it.">
+    <figcaption><span class="fig-label">Fig 5</span> Three cheap linear layers for every one full-attention layer, plus Attention Residuals — shortcuts that let a layer read from any earlier layer, not just its immediate predecessor.</figcaption>
+  </figure>
+  <p>K3 adds one more piece specific to itself, called <span class="hl">Attention Residuals</span>. In an ordinary stack, each layer only reads from the layer directly beneath it — information has to pass through every layer in between to travel from early to late in the network. Attention Residuals lets a layer selectively pull useful representations from any earlier layer, shortening the path information has to travel through depth. Put together, the stack is deliberately unequal: cheap by default, expensive on purpose, with shortcuts built in for anything that would otherwise get lost crossing all that depth.</p>
+</section>
+
+<section id="s6">
+  <span class="section-num">06</span>
+  <h2>What the redesign buys you</h2>
+  <p class="drop">The attention redesign is only half the model. Kimi K3 is also a sparse mixture-of-experts network: 2.8 trillion parameters in total, but only about 104 billion of them — 16 experts out of 896 — activated for any given token. The rest of the network sits idle for that step, which is what makes a model this large affordable to run at all. Routing which 16 experts fire is handled by a technique Moonshot calls Quantile Balancing, which spreads tokens across experts using the router's own score distribution instead of the hand-tuned balancing heuristics earlier MoE models needed.</p>
+  <figure>
+    <img src="figures/fig6-payoff-scoreboard.png" alt="A wide grid of hundreds of small expert tiles with only a handful highlighted as active, beside three large stat cards reading 1M token context window, 2.5x scaling efficiency, and roughly 6x faster decoding.">
+    <figcaption><span class="fig-label">Fig 6</span> 16 of 896 experts active per token, feeding into a model that reaches a million-token context at 2.5x the scaling efficiency of its predecessor.</figcaption>
+  </figure>
+  <div class="stat-grid">
+    <div class="stat"><span class="num">1M</span><span class="lbl">token context window</span></div>
+    <div class="stat"><span class="num">2.5x</span><span class="lbl">scaling efficiency vs Kimi K2</span></div>
+    <div class="stat"><span class="num">16 / 896</span><span class="lbl">experts active per token</span></div>
+  </div>
+  <p>None of these numbers are free-floating marketing claims — they trace back to the specific mechanisms above. The million-token window exists because the memory state stays fixed-size regardless of length. The efficiency gain exists because most of the network runs the cheap linear path. And when Moonshot tested this same attention design at smaller scale, in the earlier research model Kimi Linear, long-context decoding ran up to six times faster with three-quarters less KV cache than an equivalent full-attention model — the mechanism, not just the parameter count, is doing the work.</p>
+</section>
+
+<section id="s7">
+  <span class="section-num">07</span>
+  <h2>Why this matters</h2>
+  <p class="drop">The interesting part of Kimi K3 isn't that it's large, or even that it's open-weight — Moonshot has been shipping open models since K2. It's that the delta rule, an idea from classical recurrent learning that mostly sat unused through the first wave of deep learning, turned out to be exactly the right correction for linear attention's original flaw. DeltaNet showed the idea works. Gated DeltaNet showed it can forget. Kimi Delta Attention showed forgetting doesn't have to be one-size-fits-all.</p>
+  <p>What's worth watching next is whether the 3:1 hybrid ratio — cheap linear layers doing most of the work, full attention layers on call for precision — keeps holding as models get bigger, or whether it needs to shift. At least one lab has already tried going fully linear and walked it back, citing weaker performance on reasoning and multi-turn tasks. K3 is a bet that the right answer isn't choosing a side, but mixing carefully and being honest about the ratio.</p>
+</section>
+
+</main>
+
+<footer>
+  <p class="small-caps">Vizuara · AI Daily</p>
+  <p style="font-family:'Fraunces',serif;font-style:italic;font-size:1.3rem;margin-top:1rem">Some memories are worth keeping. Most aren't. The trick is knowing which.</p>
+  <p style="font-size:0.85rem;opacity:0.7;margin-top:1rem">Jul 30, 2026 · Explained simply, illustrated fully.</p>
+</footer>
+
+</body>
+</html>
